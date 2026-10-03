@@ -11,7 +11,7 @@ const rows = [
 
 export default function Historico() {
   return (
-    <SectionCard title="Histórico de dados" subtitle="Registro climático, mercado e condição de safra">
+    <SectionCard title="Histórico de dados" subtitle="Registro climático e condição de safra">
       <div className="filters">
         <div><label>Data inicial</label><input type="date" defaultValue="2026-09-18"/></div>
         <div><label>Data final</label><input type="date" defaultValue="2026-09-23"/></div>

@@ -1,33 +1,38 @@
 # Raisin Tech - Front-end do Projeto Integrador
 
-Front-end demonstrativo do Dashboard de Monitoramento Climático e Logístico em Nuvem para Exportadoras de Frutas.
+Front-end demonstrativo do Dashboard de Monitoramento Climático e Logístico em Nuvem para Exportadoras de Frutas, com o escopo atual concentrado no monitoramento climático e na experiência de usuários.
 
-## Requisitos usados
-- Dashboard climático e logístico
-- Monitoramento de temperatura e umidade
-- Mercado e demanda
-- Previsões de janela de colheita/exportação
+## Telas
+- Login
+- Recuperação de senha
+- Dashboard
+- Clima
+- Previsões
 - Histórico
 - Alertas
 - Relatórios
 - Usuários e permissões
-- Responsividade
-- Estrutura preparada para integração com backend/ThingSpeak
+- Perfil do usuário
 
-## Como executar
+## Interações implementadas
+- Navegação entre telas
+- Busca rápida do menu no cabeçalho
+- Recuperação de senha (protótipo)
+- Exportação de relatórios demonstrativos em arquivo TXT
+- Cadastro de novos usuários
+- Ativação/desativação de usuários
+- Edição do perfil da conta atual
+- Menu de perfil no cabeçalho e na lateral
+- Gráficos de temperatura e umidade com linha suavizada, área de tendência e tooltip ao passar o mouse
+
+## Executar
 
 ```bash
 npm install
 npm run dev
 ```
 
-Abra o endereço informado pelo Vite.
+Os dados exibidos são demonstrativos. A integração real com ThingSpeak deve ocorrer por meio do backend, sem expor chaves no front-end.
 
-## Observação
-Os dados apresentados são demonstrativos. As chaves do ThingSpeak não devem ficar no front-end. A integração real deve ocorrer através do backend/API.
-
-## Identidade visual
-O projeto utiliza a marca Raisin Tech e o logotipo fornecido pela equipe em `src/assets/raisin-tech-logo.png`.
-
-## Identidade visual
-O front-end utiliza a logo transparente da Raisin Tech e a paleta da marca: roxo/violeta como cor principal, verde como cor de apoio e fundos claros para manter legibilidade.
+## Escopo atual
+As telas de Mercado e Logística foram retiradas do front-end por não fazerem parte do escopo atual do projeto.
