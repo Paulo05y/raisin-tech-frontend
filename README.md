@@ -7,8 +7,6 @@ Front-end demonstrativo do Dashboard de Monitoramento Climático e Logístico em
 - Recuperação de senha
 - Dashboard
 - Clima
-- Previsões
-- Histórico
 - Alertas
 - Relatórios
 - Usuários e permissões
