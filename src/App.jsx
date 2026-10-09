@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -12,6 +12,7 @@ import Alertas from "./pages/Alertas";
 import Relatorios from "./pages/Relatorios";
 import Usuarios from "./pages/Usuarios";
 import Perfil from "./pages/Perfil";
+import { getUsuarioLogado, logout as logoutService } from "./services/authService";
 
 const pageTitles = {
   "/dashboard": ["Dashboard", "Visão geral da operação"],
@@ -28,7 +29,6 @@ function ProtectedLayout({ onLogout, user, setUser }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [role] = useState("Administrador");
   const [notice, setNotice] = useState("");
 
   if (location.pathname === "/") return <Navigate to="/dashboard" replace />;
@@ -64,7 +64,7 @@ function ProtectedLayout({ onLogout, user, setUser }) {
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onLogout={onLogout}
-        role={role}
+        role={user?.role}
         user={user}
       />
       <div className="main-area">
@@ -96,28 +96,54 @@ function ProtectedLayout({ onLogout, user, setUser }) {
   );
 }
 
+function montarUsuario(dadosLogin) {
+  // O backend hoje só devolve nome, email e perfil.
+  // telefone/empresa/localização ficam como placeholder até existirem no backend.
+  return {
+    name: dadosLogin.nome,
+    email: dadosLogin.email,
+    role: dadosLogin.perfil,
+    phone: "",
+    company: "Raisin Tech",
+    location: "Petrolina / Juazeiro"
+  };
+}
+
 export default function App() {
   const location = useLocation();
   const [logged, setLogged] = useState(false);
-  const [user, setUser] = useState({
-    name: "Matheus Paulo",
-    email: "matheus@raisin-tech.com",
-    role: "Administrador",
-    phone: "(87) 99999-0000",
-    company: "Raisin Tech",
-    location: "Petrolina / Juazeiro"
-  });
+  const [user, setUser] = useState(null);
+
+  // Ao carregar a página, verifica se já existe uma sessão salva
+  useEffect(() => {
+    const usuarioSalvo = getUsuarioLogado();
+    if (usuarioSalvo) {
+      setUser(montarUsuario(usuarioSalvo));
+      setLogged(true);
+    }
+  }, []);
+
+  function handleLogin(dadosLogin) {
+    setUser(montarUsuario(dadosLogin));
+    setLogged(true);
+  }
+
+  function handleLogout() {
+    logoutService();
+    setUser(null);
+    setLogged(false);
+  }
 
   if (!logged) {
     if (location.pathname === "/recuperar-senha") {
       return <ForgotPassword />;
     }
-    return <Login onLogin={() => setLogged(true)} />;
+    return <Login onLogin={handleLogin} />;
   }
 
   return (
     <ProtectedLayout
-      onLogout={() => setLogged(false)}
+      onLogout={handleLogout}
       user={user}
       setUser={setUser}
     />
