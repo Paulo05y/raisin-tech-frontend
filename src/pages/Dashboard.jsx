@@ -1,67 +1,211 @@
-import { Activity, Droplets, PackageCheck, Sun, Thermometer } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Activity, Droplets, Thermometer } from "lucide-react";
 import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import LineChart from "../components/LineChart";
+import api from "../services/api";
 
-const temps = [26.7, 27.8, 27.1, 28.6, 29.2, 28.8, 28.1, 29.0, 30.1, 29.6, 28.9, 28.5];
-const humidity = [62, 65, 68, 66, 72, 75, 71, 69, 73, 70, 68, 67];
-const labels = ["08h","09h","10h","11h","12h","13h","14h","15h","16h","17h","18h","19h"];
+const HORAS_JANELA = 12;
+const FAIXA_UMIDADE = [60, 75];
+
+const fmt = (n) => Number(n).toFixed(1).replace(".", ",");
+
+// O backend guarda o horário do ThingSpeak em UTC (sem fuso), então marcamos com "Z"
+// para o navegador converter para o horário local.
+const paraDataLocal = (dataHora) => new Date(`${dataHora}Z`);
+
+// A API espera data/hora ISO sem fuso, em UTC
+const paraParametro = (data) => data.toISOString().slice(0, 19);
+
+// Agrupa as leituras por hora (média), para o gráfico ficar com poucos pontos
+function agruparPorHora(leituras) {
+  const grupos = new Map();
+  leituras.forEach((l) => {
+    const d = paraDataLocal(l.dataHora);
+    const chave = new Date(d).setMinutes(0, 0, 0);
+    if (!grupos.has(chave)) grupos.set(chave, { temps: [], umids: [] });
+    grupos.get(chave).temps.push(l.temperatura);
+    grupos.get(chave).umids.push(l.umidade);
+  });
+
+  const media = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+
+  return [...grupos.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([chave, g]) => ({
+      label: `${String(new Date(chave).getHours()).padStart(2, "0")}h`,
+      temperatura: Number(media(g.temps).toFixed(1)),
+      umidade: Number(media(g.umids).toFixed(1)),
+    }));
+}
+
+// Ajuste os nomes aqui quando eu vir o enum NivelAlerta
+const TIPO_POR_NIVEL = { INFO: "info", ATENCAO: "warning", CRITICO: "danger" };
+
+const simbolo = { success: "✓", warning: "!", info: "i", danger: "×" };
+
+function formatarDataHora(dataHora) {
+  const d = new Date(dataHora);
+  const hoje = new Date();
+  const ontem = new Date();
+  ontem.setDate(hoje.getDate() - 1);
+  const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === hoje.toDateString()) return `Hoje, ${hora}`;
+  if (d.toDateString() === ontem.toDateString()) return `Ontem, ${hora}`;
+  return `${d.toLocaleDateString("pt-BR")} ${hora}`;
+}
 
 export default function Dashboard() {
+  const [ultima, setUltima] = useState(null);
+  const [serie, setSerie] = useState([]);
+  const [alertas, setAlertas] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+
+  async function carregar() {
+    try {
+      const fim = new Date();
+      const inicio = new Date(fim.getTime() - HORAS_JANELA * 60 * 60 * 1000);
+
+      const [resUltima, resLeituras, resAlertas] = await Promise.all([
+        api.get("/api/leituras-climaticas/ultima"),
+        api.get("/api/leituras-climaticas", {
+          params: { inicio: paraParametro(inicio), fim: paraParametro(fim) },
+        }),
+        api.get("/api/alertas/nao-lidos"),
+      ]);
+
+      setUltima(resUltima.data || null);
+      setSerie(agruparPorHora(resLeituras.data || []));
+      setAlertas(resAlertas.data || []);
+      setErro("");
+    } catch (e) {
+      setErro("Não foi possível carregar os dados do servidor.");
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  useEffect(() => {
+    carregar();
+    const id = setInterval(carregar, 30000); // atualiza a cada 30s
+    return () => clearInterval(id);
+  }, []);
+
+  const temps = serie.map((p) => p.temperatura);
+  const umids = serie.map((p) => p.umidade);
+  const labels = serie.map((p) => p.label);
+  const temGrafico = serie.length >= 2;
+
+  const variacaoTemp = temGrafico ? temps[temps.length - 1] - temps[0] : null;
+  const umidadeOk = ultima && ultima.umidade >= FAIXA_UMIDADE[0] && ultima.umidade <= FAIXA_UMIDADE[1];
+
+  const dataExtenso = new Date()
+    .toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" })
+    .toUpperCase();
+
   return (
     <>
       <div className="welcome-row">
         <div>
-          <span className="eyebrow">QUARTA-FEIRA, 23 DE SETEMBRO</span>
+          <span className="eyebrow">{dataExtenso}</span>
           <h2>Visão geral da operação</h2>
           <p>Acompanhe as condições para tomar decisões mais seguras.</p>
         </div>
-        <div className="status-pill"><span className="status-dot"/> Sistema operacional</div>
+        <div className="status-pill">
+          <span className={`status-dot ${erro ? "offline" : ""}`} />
+          {erro ? "Sem conexão com o servidor" : "Sistema operacional"}
+        </div>
       </div>
 
+      {erro && <div className="filter-feedback error" role="alert">{erro}</div>}
+
       <div className="stats-grid">
-        <StatCard icon={Thermometer} label="Temperatura" value="28,5 °C" detail="Atual • +1,2 °C hoje" />
-        <StatCard icon={Droplets} label="Umidade" value="67%" detail="Atual • dentro do ideal" tone="blue" />
-        <StatCard icon={PackageCheck} label="Janela de colheita" value="Ideal" detail="26 a 29 de setembro" tone="purple" />
+        <StatCard
+          icon={Thermometer}
+          label="Temperatura"
+          value={ultima ? `${fmt(ultima.temperatura)} °C` : "—"}
+          detail={
+            variacaoTemp !== null
+              ? `Atual • ${variacaoTemp >= 0 ? "+" : ""}${fmt(variacaoTemp)} °C em ${HORAS_JANELA}h`
+              : "Aguardando leituras"
+          }
+        />
+        <StatCard
+          icon={Droplets}
+          label="Umidade"
+          value={ultima ? `${Math.round(ultima.umidade)}%` : "—"}
+          detail={
+            ultima
+              ? `Atual • ${umidadeOk ? "dentro do ideal" : "fora da faixa ideal"} (${FAIXA_UMIDADE[0]}–${FAIXA_UMIDADE[1]}%)`
+              : "Aguardando leituras"
+          }
+          tone="blue"
+        />
       </div>
 
       <div className="dashboard-grid">
-        <SectionCard title="Temperatura" subtitle="Últimas 12 horas" action={<span className="metric-badge">°C</span>}>
-          <div className="chart-summary"><strong>28,5°C</strong><span>+1,2°C desde 08:00</span></div>
-          <LineChart values={temps} labels={labels} unit="°C" titleFormat={(v) => `${v.toFixed(1).replace('.', ',')} °C`} stroke="#7A16F8" gradientId="tempGradient" />
-        </SectionCard>
-
-        <SectionCard title="Umidade relativa" subtitle="Últimas 12 horas" action={<span className="metric-badge">%</span>}>
-          <div className="chart-summary"><strong>67%</strong><span>Dentro do intervalo ideal</span></div>
-          <LineChart values={humidity} labels={labels} unit="%" titleFormat={(v) => `${v}%`} stroke="#5C4AE4" gradientId="humidityGradient" />
-        </SectionCard>
-
-        <SectionCard title="Condição para exportação" subtitle="Análise climática consolidada" className="wide-card">
-          <div className="forecast-highlight">
-            <div className="forecast-icon"><Sun size={28}/></div>
-            <div>
-              <span>JANELA RECOMENDADA</span>
-              <strong>26 — 29 SET</strong>
-              <p>Condições climáticas favoráveis para programação da colheita e exportação.</p>
+        <SectionCard title="Temperatura" subtitle={`Últimas ${HORAS_JANELA} horas`} action={<span className="metric-badge">°C</span>}>
+          {temGrafico ? (
+            <>
+              <div className="chart-summary">
+                <strong>{fmt(temps[temps.length - 1])}°C</strong>
+                <span>{variacaoTemp >= 0 ? "+" : ""}{fmt(variacaoTemp)}°C desde {labels[0]}</span>
+              </div>
+              <LineChart values={temps} labels={labels} unit="°C" titleFormat={(v) => `${fmt(v)} °C`} stroke="#7A16F8" gradientId="tempGradient" />
+            </>
+          ) : (
+            <div className="empty-state">
+              <strong>{carregando ? "Carregando..." : "Dados insuficientes para o gráfico."}</strong>
+              <span>São necessárias leituras em pelo menos 2 horas diferentes.</span>
             </div>
-            <div className="confidence"><strong>89%</strong><span>confiança</span></div>
-          </div>
-          <div className="condition-grid">
-            <div><Thermometer size={18}/><span>Temperatura</span><strong>Favorável</strong></div>
-            <div><Droplets size={18}/><span>Umidade</span><strong>Favorável</strong></div>
-          </div>
+          )}
         </SectionCard>
 
-        <SectionCard title="Alertas recentes" subtitle="Últimas ocorrências">
+        <SectionCard title="Umidade relativa" subtitle={`Últimas ${HORAS_JANELA} horas`} action={<span className="metric-badge">%</span>}>
+          {temGrafico ? (
+            <>
+              <div className="chart-summary">
+                <strong>{Math.round(umids[umids.length - 1])}%</strong>
+                <span>Média das últimas {HORAS_JANELA}h: {fmt(umids.reduce((a, b) => a + b, 0) / umids.length)}%</span>
+              </div>
+              <LineChart values={umids} labels={labels} unit="%" titleFormat={(v) => `${fmt(v)}%`} stroke="#5C4AE4" gradientId="humidityGradient" />
+            </>
+          ) : (
+            <div className="empty-state">
+              <strong>{carregando ? "Carregando..." : "Dados insuficientes para o gráfico."}</strong>
+              <span>São necessárias leituras em pelo menos 2 horas diferentes.</span>
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard title="Alertas recentes" subtitle="Alertas não lidos">
           <div className="alert-list">
-            <div className="alert-item success"><span className="alert-symbol">✓</span><div><strong>Janela favorável identificada</strong><small>Hoje, 14:30</small></div></div>
-            <div className="alert-item warning"><span className="alert-symbol">!</span><div><strong>Umidade acima da média</strong><small>Hoje, 12:15</small></div></div>
-            <div className="alert-item info"><span className="alert-symbol">i</span><div><strong>Dados atualizados pelo sensor</strong><small>Hoje, 11:58</small></div></div>
+            {alertas.length === 0 && !carregando && (
+              <div className="empty-state"><strong>Nenhum alerta pendente.</strong></div>
+            )}
+            {alertas.slice(0, 3).map((a) => {
+              const tipo = TIPO_POR_NIVEL[a.nivel] || "info";
+              return (
+                <div className={`alert-item ${tipo}`} key={a.id}>
+                  <span className="alert-symbol">{simbolo[tipo]}</span>
+                  <div>
+                    <strong>{a.mensagem}</strong>
+                    <small>{formatarDataHora(a.dataHora)}</small>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </SectionCard>
       </div>
 
-      <div className="dashboard-footer-note"><Activity size={16}/> Dados demonstrativos. A integração real deverá consumir a API do ThingSpeak através do backend.</div>
+      <div className="dashboard-footer-note">
+        <Activity size={16} />
+        {ultima
+          ? `Última leitura: ${paraDataLocal(ultima.dataHora).toLocaleString("pt-BR")} • atualização automática a cada 30s`
+          : "Aguardando a primeira leitura do sensor."}
+      </div>
     </>
   );
 }

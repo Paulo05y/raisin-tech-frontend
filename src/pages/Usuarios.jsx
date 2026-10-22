@@ -1,46 +1,81 @@
 import { Edit3, MoreHorizontal, Plus, Shield, UserPlus, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import SectionCard from "../components/SectionCard";
+import api from "../services/api";
 
-const initialUsers = [
-  { name: "Matheus Paulo", email: "matheus@raisin-tech.com", role: "Administrador", status: "Ativo" },
-  { name: "João Silva", email: "joao@raisin-tech.com", role: "Produtor", status: "Ativo" },
-  { name: "Maria Souza", email: "maria@raisin-tech.com", role: "Analista de Dados", status: "Ativo" },
-  { name: "Carlos Lima", email: "carlos@raisin-tech.com", role: "Produtor", status: "Inativo" }
-];
+// Valores exatos do enum PerfilUsuario do backend
+const PERFIS = {
+  ADMINISTRADOR: "Administrador",
+  ANALISTA_DADOS: "Analista de Dados",
+  PRODUTOR_EXPORTADOR: "Produtor Exportador",
+};
+
+const FORM_VAZIO = { nome: "", email: "", senha: "", perfil: "PRODUTOR_EXPORTADOR" };
 
 export default function Usuarios({ user, onNotice }) {
   const navigate = useNavigate();
-  const [users, setUsers] = useState(initialUsers);
+  const [users, setUsers] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
   const [showModal, setShowModal] = useState(false);
-  const [menuEmail, setMenuEmail] = useState("");
-  const [form, setForm] = useState({ name: "", email: "", role: "Produtor" });
+  const [salvando, setSalvando] = useState(false);
+  const [menuId, setMenuId] = useState(null);
+  const [form, setForm] = useState(FORM_VAZIO);
+
+  async function carregar() {
+    try {
+      const res = await api.get("/api/usuarios");
+      setUsers(res.data || []);
+      setErro("");
+    } catch (e) {
+      if (e.response?.status === 403) {
+        setErro("Apenas administradores podem acessar a gestão de usuários.");
+      } else {
+        setErro("Não foi possível carregar os usuários do servidor.");
+      }
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  useEffect(() => {
+    carregar();
+  }, []);
 
   const counts = useMemo(() => ({
     total: users.length,
-    admins: users.filter((u) => u.role === "Administrador").length,
-    analysts: users.filter((u) => u.role === "Analista de Dados").length
+    admins: users.filter((u) => u.perfil === "ADMINISTRADOR").length,
+    analysts: users.filter((u) => u.perfil === "ANALISTA_DADOS").length,
   }), [users]);
 
-  const addUser = (event) => {
+  async function addUser(event) {
     event.preventDefault();
-    const exists = users.some((u) => u.email.toLowerCase() === form.email.toLowerCase());
-    if (exists) {
-      onNotice("Já existe um usuário com esse e-mail.");
-      return;
+    setSalvando(true);
+    try {
+      await api.post("/api/usuarios/cadastro", form);
+      setForm(FORM_VAZIO);
+      setShowModal(false);
+      await carregar();
+      onNotice("Novo usuário adicionado com sucesso.");
+    } catch (e) {
+      const msg = e.response?.data?.message || e.response?.data?.mensagem;
+      onNotice(msg || "Não foi possível cadastrar. Verifique os dados (e-mail já existe? senha com 6+ caracteres?).");
+    } finally {
+      setSalvando(false);
     }
-    setUsers((current) => [...current, { ...form, status: "Ativo" }]);
-    setForm({ name: "", email: "", role: "Produtor" });
-    setShowModal(false);
-    onNotice("Novo usuário adicionado com sucesso.");
-  };
+  }
 
-  const toggleStatus = (email) => {
-    setUsers((current) => current.map((item) => item.email === email ? { ...item, status: item.status === "Ativo" ? "Inativo" : "Ativo" } : item));
-    onNotice("Status do usuário atualizado.");
-    setMenuEmail("");
-  };
+  async function toggleStatus(item) {
+    setMenuId(null);
+    try {
+      const res = await api.put(`/api/usuarios/${item.id}/ativo`, { ativo: !item.ativo });
+      setUsers((atual) => atual.map((u) => (u.id === item.id ? res.data : u)));
+      onNotice("Status do usuário atualizado.");
+    } catch (e) {
+      onNotice("Não foi possível alterar o status deste usuário.");
+    }
+  }
 
   return (
     <>
@@ -51,34 +86,50 @@ export default function Usuarios({ user, onNotice }) {
           <div><Shield size={18}/><span>Administradores</span><strong>{counts.admins}</strong></div>
           <div><Edit3 size={18}/><span>Analistas</span><strong>{counts.analysts}</strong></div>
         </div>
-        <div className="table-wrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Status</th><th></th></tr></thead><tbody>
-          {users.map((item) => {
-            const initials = item.name.split(" ").map((x) => x[0]).slice(0,2).join("").toUpperCase();
-            return <tr key={item.email}>
-              <td><div className="user-cell"><div className="avatar small-avatar">{initials}</div><strong>{item.name}</strong></div></td>
-              <td>{item.email}</td><td>{item.role}</td>
-              <td><span className={`tag ${item.status === "Ativo" ? "success" : "orange"}`}>{item.status}</span></td>
-              <td className="action-cell">
-                <button className="more-button" onClick={() => setMenuEmail(menuEmail === item.email ? "" : item.email)} aria-label={`Ações para ${item.name}`}><MoreHorizontal size={19}/></button>
-                {menuEmail === item.email && <div className="user-action-menu">
-                  {item.email === user.email && <button onClick={() => { navigate("/perfil"); setMenuEmail(""); }}>Ver meu perfil</button>}
-                  <button onClick={() => toggleStatus(item.email)}>{item.status === "Ativo" ? "Desativar usuário" : "Ativar usuário"}</button>
-                </div>}
-              </td>
-            </tr>;
-          })}
-        </tbody></table></div>
-        <div className="users-note"><Shield size={15}/> O controle de acesso deve ser conectado ao RBAC do backend na integração final.</div>
+
+        {erro && <div className="filter-feedback error" role="alert">{erro}</div>}
+
+        <div className="table-wrap">
+          {carregando ? (
+            <div className="empty-state"><strong>Carregando...</strong></div>
+          ) : users.length === 0 && !erro ? (
+            <div className="empty-state"><strong>Nenhum usuário cadastrado.</strong></div>
+          ) : (
+            <table><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Status</th><th></th></tr></thead><tbody>
+              {users.map((item) => {
+                const initials = item.nome.split(" ").map((x) => x[0]).slice(0, 2).join("").toUpperCase();
+                const ehEu = item.email === user.email;
+                return <tr key={item.id}>
+                  <td><div className="user-cell"><div className="avatar small-avatar">{initials}</div><strong>{item.nome}</strong></div></td>
+                  <td>{item.email}</td>
+                  <td>{PERFIS[item.perfil] || item.perfil}</td>
+                  <td><span className={`tag ${item.ativo ? "success" : "orange"}`}>{item.ativo ? "Ativo" : "Inativo"}</span></td>
+                  <td className="action-cell">
+                    <button className="more-button" onClick={() => setMenuId(menuId === item.id ? null : item.id)} aria-label={`Ações para ${item.nome}`}><MoreHorizontal size={19}/></button>
+                    {menuId === item.id && <div className="user-action-menu">
+                      {ehEu && <button onClick={() => { navigate("/perfil"); setMenuId(null); }}>Ver meu perfil</button>}
+                      {!ehEu && <button onClick={() => toggleStatus(item)}>{item.ativo ? "Desativar usuário" : "Ativar usuário"}</button>}
+                    </div>}
+                  </td>
+                </tr>;
+              })}
+            </tbody></table>
+          )}
+        </div>
+        <div className="users-note"><Shield size={15}/> Apenas administradores podem listar, cadastrar e ativar/desativar usuários.</div>
       </SectionCard>
 
       {showModal && <div className="modal-backdrop" onMouseDown={() => setShowModal(false)}>
         <div className="modal-card" onMouseDown={(e) => e.stopPropagation()}>
           <div className="modal-header"><div><h3>Novo usuário</h3><p>Cadastre uma pessoa para acessar a Raisin Tech.</p></div><button className="modal-close" onClick={() => setShowModal(false)} aria-label="Fechar"><X size={20}/></button></div>
           <form className="user-form" onSubmit={addUser}>
-            <label>Nome completo<input value={form.name} onChange={(e) => setForm({...form, name:e.target.value})} placeholder="Ex.: Ana Beatriz" required /></label>
-            <label>E-mail<input type="email" value={form.email} onChange={(e) => setForm({...form, email:e.target.value})} placeholder="ana@raisin-tech.com" required /></label>
-            <label>Perfil<select value={form.role} onChange={(e) => setForm({...form, role:e.target.value})}><option>Produtor</option><option>Analista de Dados</option><option>Administrador</option></select></label>
-            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowModal(false)}>Cancelar</button><button className="primary-button">Adicionar usuário</button></div>
+            <label>Nome completo<input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex.: Ana Beatriz" required /></label>
+            <label>E-mail<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="ana@raisin-tech.com" required /></label>
+            <label>Senha<input type="password" value={form.senha} onChange={(e) => setForm({ ...form, senha: e.target.value })} placeholder="Mínimo 6 caracteres" minLength={6} required /></label>
+            <label>Perfil<select value={form.perfil} onChange={(e) => setForm({ ...form, perfil: e.target.value })}>
+              {Object.entries(PERFIS).map(([valor, rotulo]) => <option key={valor} value={valor}>{rotulo}</option>)}
+            </select></label>
+            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowModal(false)}>Cancelar</button><button className="primary-button" disabled={salvando}>{salvando ? "Salvando..." : "Adicionar usuário"}</button></div>
           </form>
         </div>
       </div>}

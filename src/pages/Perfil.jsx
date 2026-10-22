@@ -1,61 +1,142 @@
-import { Check, Mail, MapPin, Pencil, Phone, Save, ShieldCheck, UserRound, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Save } from "lucide-react";
 import SectionCard from "../components/SectionCard";
+import api from "../services/api";
+
+// Valores exatos do enum PerfilUsuario do backend
+const PERFIS = {
+  ADMINISTRADOR: "Administrador",
+  ANALISTA_DADOS: "Analista de Dados",
+  PRODUTOR_EXPORTADOR: "Produtor Exportador",
+};
+
+const VAZIO = { nome: "", email: "", perfil: "", telefone: "", empresa: "", localizacao: "" };
 
 export default function Perfil({ user, setUser, onNotice }) {
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState(user);
-  const initials = user.name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+  const [form, setForm] = useState(VAZIO);
+  const [carregando, setCarregando] = useState(true);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
 
-  const save = (event) => {
+  useEffect(() => {
+    async function carregar() {
+      try {
+        const res = await api.get("/api/usuarios/me");
+        const d = res.data;
+        setForm({
+          nome: d.nome || "",
+          email: d.email || "",
+          perfil: d.perfil || "",
+          telefone: d.telefone || "",
+          empresa: d.empresa || "",
+          localizacao: d.localizacao || "",
+        });
+        // Sincroniza o usuário global (Header e Sidebar) com os dados reais
+        setUser((atual) => ({
+          ...atual,
+          name: d.nome,
+          phone: d.telefone || "",
+          company: d.empresa || "",
+          location: d.localizacao || "",
+        }));
+        setErro("");
+      } catch (e) {
+        setErro("Não foi possível carregar seu perfil do servidor.");
+      } finally {
+        setCarregando(false);
+      }
+    }
+    carregar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const atualizar = (campo) => (e) => setForm({ ...form, [campo]: e.target.value });
+
+  async function salvar(event) {
     event.preventDefault();
-    setUser(form);
-    setEditing(false);
-    onNotice("Perfil atualizado com sucesso.");
-  };
+    setSalvando(true);
+    try {
+      const res = await api.put("/api/usuarios/me", form);
+      const d = res.data;
+
+      setUser((atual) => ({
+        ...atual,
+        name: d.nome,
+        phone: d.telefone || "",
+        company: d.empresa || "",
+        location: d.localizacao || "",
+      }));
+
+      // Mantém o nome atualizado também ao recarregar a página
+      try {
+        const salvo = JSON.parse(localStorage.getItem("usuario") || "{}");
+        localStorage.setItem("usuario", JSON.stringify({ ...salvo, nome: d.nome }));
+      } catch {
+        /* ignora */
+      }
+
+      onNotice("Perfil atualizado com sucesso.");
+    } catch (e) {
+      onNotice("Não foi possível salvar o perfil. Tente novamente.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  const iniciais = (form.nome || user?.name || "?")
+    .split(" ")
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
   return (
-    <div className="profile-page">
-      <SectionCard className="profile-hero-card">
-        <div className="profile-hero">
-          <div className="profile-avatar-large">{initials}</div>
-          <div className="profile-summary"><span className="eyebrow">CONTA ATIVA</span><h2>{user.name}</h2><p>{user.role} • {user.company}</p><div className="profile-status"><span className="status-dot"/> Usuário ativo</div></div>
-          <button className="primary-button small" onClick={() => { setForm(user); setEditing(true); }}><Pencil size={16}/> Editar perfil</button>
-        </div>
-      </SectionCard>
+    <SectionCard title="Meu perfil" subtitle="Dados da sua conta">
+      {erro && <div className="filter-feedback error" role="alert">{erro}</div>}
 
-      <div className="profile-grid">
-        <SectionCard title="Informações pessoais" subtitle="Dados usados na sua conta">
-          <div className="profile-info-grid">
-            <div><UserRound size={17}/><span>Nome</span><strong>{user.name}</strong></div>
-            <div><Mail size={17}/><span>E-mail</span><strong>{user.email}</strong></div>
-            <div><Phone size={17}/><span>Telefone</span><strong>{user.phone}</strong></div>
-            <div><MapPin size={17}/><span>Operação</span><strong>{user.location}</strong></div>
+      {carregando ? (
+        <div className="empty-state"><strong>Carregando...</strong></div>
+      ) : (
+        <form className="user-form" onSubmit={salvar}>
+          <div className="user-cell" style={{ marginBottom: 16 }}>
+            <div className="avatar">{iniciais}</div>
+            <div>
+              <strong>{form.nome}</strong>
+              <div><span className="tag success">{PERFIS[form.perfil] || form.perfil}</span></div>
+            </div>
           </div>
-        </SectionCard>
-        <SectionCard title="Permissões" subtitle="Perfil de acesso atual">
-          <div className="permission-card"><div className="permission-icon"><ShieldCheck size={23}/></div><div><strong>{user.role}</strong><p>Acesso administrativo às áreas liberadas do sistema.</p></div></div>
-          <div className="permission-list"><div><Check size={15}/> Visualizar dashboard</div><div><Check size={15}/> Monitorar clima</div><div><Check size={15}/> Visualizar previsões</div><div><Check size={15}/> Gerenciar usuários</div></div>
-        </SectionCard>
-      </div>
 
-      <SectionCard title="Preferências da conta" subtitle="Configurações demonstrativas">
-        <div className="preference-row"><div><strong>Alertas do sistema</strong><span>Receber avisos quando houver condições importantes.</span></div><label className="switch"><input type="checkbox" defaultChecked/><span /></label></div>
-        <div className="preference-row"><div><strong>Resumo diário</strong><span>Resumo das condições climáticas da operação.</span></div><label className="switch"><input type="checkbox" defaultChecked/><span /></label></div>
-      </SectionCard>
+          <label>Nome completo
+            <input value={form.nome} onChange={atualizar("nome")} required />
+          </label>
 
-      {editing && <div className="modal-backdrop" onMouseDown={() => setEditing(false)}>
-        <div className="modal-card" onMouseDown={(e) => e.stopPropagation()}>
-          <div className="modal-header"><div><h3>Editar perfil</h3><p>Atualize os dados da sua conta.</p></div><button className="modal-close" onClick={() => setEditing(false)}><X size={20}/></button></div>
-          <form className="user-form" onSubmit={save}>
-            <label>Nome completo<input value={form.name} onChange={(e) => setForm({...form, name:e.target.value})} required /></label>
-            <label>E-mail<input type="email" value={form.email} onChange={(e) => setForm({...form, email:e.target.value})} required /></label>
-            <label>Telefone<input value={form.phone} onChange={(e) => setForm({...form, phone:e.target.value})} /></label>
-            <label>Operação<input value={form.location} onChange={(e) => setForm({...form, location:e.target.value})} /></label>
-            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setEditing(false)}>Cancelar</button><button className="primary-button"><Save size={16}/> Salvar alterações</button></div>
-          </form>
-        </div>
-      </div>}
-    </div>
+          <label>E-mail
+            <input value={form.email} disabled />
+          </label>
+
+          <label>Perfil de acesso
+            <input value={PERFIS[form.perfil] || form.perfil} disabled />
+          </label>
+
+          <label>Telefone
+            <input value={form.telefone} onChange={atualizar("telefone")} placeholder="(87) 99999-9999" />
+          </label>
+
+          <label>Empresa
+            <input value={form.empresa} onChange={atualizar("empresa")} placeholder="Ex.: Raisin Tech" />
+          </label>
+
+          <label>Localização
+            <input value={form.localizacao} onChange={atualizar("localizacao")} placeholder="Ex.: Petrolina / Juazeiro" />
+          </label>
+
+          <div className="modal-actions">
+            <button className="primary-button" disabled={salvando}>
+              <Save size={17} /> {salvando ? "Salvando..." : "Salvar alterações"}
+            </button>
+          </div>
+        </form>
+      )}
+    </SectionCard>
   );
 }
