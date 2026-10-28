@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { ArrowRight, Eye, EyeOff, Leaf, Lock, Mail } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logo from "../assets/raisin-tech-logo.png";
 import { login } from "../services/authService";
 
 export default function Login({ onLogin }) {
   const [show, setShow] = useState(false);
-  const [email, setEmail] = useState("admin@raisin-tech.com");
-  const [senha, setSenha] = useState("123456");
+  const [email, setEmail] = useState("");
+  const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
   const navigate = useNavigate();
@@ -22,7 +22,11 @@ export default function Login({ onLogin }) {
       onLogin(dados);
       navigate("/dashboard");
     } catch (err) {
-      setErro("E-mail ou senha inválidos");
+      if (!err.response) {
+        setErro("Não foi possível conectar ao servidor. Aguarde um instante e tente novamente.");
+      } else {
+        setErro("E-mail ou senha inválidos");
+      }
     } finally {
       setCarregando(false);
     }
@@ -60,6 +64,7 @@ export default function Login({ onLogin }) {
               placeholder="seu@email.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="username"
               required
             />
           </div>
@@ -72,6 +77,7 @@ export default function Login({ onLogin }) {
               placeholder="Digite sua senha"
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
+              autoComplete="current-password"
               required
             />
             <button type="button" onClick={() => setShow(!show)} aria-label={show ? "Ocultar senha" : "Mostrar senha"}>{show ? <EyeOff size={18}/> : <Eye size={18}/>}</button>
