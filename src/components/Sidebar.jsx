@@ -1,6 +1,6 @@
 import {
   Bell, CloudSun, FileText, History, LayoutDashboard,
-  Leaf, LogOut, Users, UserCircle, X
+  Leaf, LogOut, TrendingUp, Users, UserCircle, X
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import logo from "../assets/raisin-tech-logo.png";
@@ -10,6 +10,7 @@ const items = [
   { to: "/clima", label: "Clima", icon: CloudSun },
   { to: "/previsoes", label: "Previsões", icon: Leaf },
   { to: "/historico", label: "Histórico", icon: History },
+  { to: "/mercado", label: "Dados de mercado", icon: TrendingUp },
   { to: "/alertas", label: "Alertas", icon: Bell },
   { to: "/relatorios", label: "Relatórios", icon: FileText },
   { to: "/usuarios", label: "Usuários", icon: Users }

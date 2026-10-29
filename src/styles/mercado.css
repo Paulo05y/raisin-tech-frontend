@@ -1,0 +1,94 @@
+.mercado-nota {
+  background: #f5f0ff;
+  border: 1px solid #e2d6fb;
+  color: #4c1d95;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.mercado-select {
+  padding: 10px 12px;
+  border: 1px solid #d9d5e6;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  min-width: 220px;
+}
+
+.mercado-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.mercado-kpi {
+  background: #fff;
+  border: 1px solid #e6e3ee;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.mercado-kpi span {
+  display: block;
+  font-size: 13px;
+  color: #6b6580;
+  margin-bottom: 6px;
+}
+
+.mercado-kpi strong {
+  font-size: 22px;
+}
+
+.mercado-up {
+  color: #0f9d58;
+}
+
+.mercado-down {
+  color: #d9480f;
+}
+
+.mercado-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.mercado-chart {
+  background: #fff;
+  border: 1px solid #e6e3ee;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.mercado-chart h3,
+.mercado-subtitulo {
+  font-size: 16px;
+  margin: 0 0 10px;
+}
+
+.mercado-subtitulo {
+  margin-top: 8px;
+}
+
+.mercado-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.mercado-comment {
+  font-size: 14px;
+  color: #4b4560;
+  margin: 12px 0 0;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .mercado-charts {
+    grid-template-columns: 1fr;
+  }
+}

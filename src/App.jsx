@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Clima from "./pages/Clima";
 import Previsoes from "./pages/Previsoes";
 import Historico from "./pages/Historico";
+import DadosMercado from "./pages/DadosMercado";
 import Alertas from "./pages/Alertas";
 import Relatorios from "./pages/Relatorios";
 import Usuarios from "./pages/Usuarios";
@@ -19,6 +20,7 @@ const pageTitles = {
   "/clima": ["Clima", "Monitoramento dos sensores e condições climáticas"],
   "/previsoes": ["Previsões", "Janela ideal para colheita e exportação"],
   "/historico": ["Histórico", "Dados climáticos e de safra"],
+  "/mercado": ["Dados de mercado", "Preço da uva e demanda de exportação"],
   "/alertas": ["Alertas", "Ocorrências e condições importantes"],
   "/relatorios": ["Relatórios", "Indicadores de segurança e qualidade"],
   "/usuarios": ["Usuários", "Gestão de acessos e permissões"],
@@ -45,7 +47,9 @@ function ProtectedLayout({ onLogout, user, setUser }) {
     if (!value) return;
     const pages = [
       ["dashboard", "/dashboard"], ["clima", "/clima"], ["previsão", "/previsoes"], ["previsoes", "/previsoes"],
-      ["histórico", "/historico"], ["historico", "/historico"], ["alerta", "/alertas"], ["alertas", "/alertas"],
+      ["histórico", "/historico"], ["historico", "/historico"], ["mercado", "/mercado"], ["dados de mercado", "/mercado"],
+      ["preço", "/mercado"], ["preco", "/mercado"], ["demanda", "/mercado"],
+      ["alerta", "/alertas"], ["alertas", "/alertas"],
       ["relatório", "/relatorios"], ["relatorios", "/relatorios"], ["usuário", "/usuarios"], ["usuarios", "/usuarios"],
       ["perfil", "/perfil"]
     ];
@@ -83,6 +87,7 @@ function ProtectedLayout({ onLogout, user, setUser }) {
             <Route path="/clima" element={<Clima />} />
             <Route path="/previsoes" element={<Previsoes />} />
             <Route path="/historico" element={<Historico />} />
+            <Route path="/mercado" element={<DadosMercado />} />
             <Route path="/alertas" element={<Alertas />} />
             <Route path="/relatorios" element={<Relatorios onNotice={showNotice} />} />
             <Route path="/usuarios" element={<Usuarios user={user} onNotice={showNotice} />} />
