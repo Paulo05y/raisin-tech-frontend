@@ -4,40 +4,13 @@ import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import LineChart from "../components/LineChart";
 import api from "../services/api";
+import { montarSerie, paraDataLocal, paraParametro } from "../utils/serieClimatica";
 
 const HORAS_JANELA = 12;
 const FAIXA_UMIDADE = [60, 75];
+const ATUALIZACAO_MS = 15000;
 
 const fmt = (n) => Number(n).toFixed(1).replace(".", ",");
-
-// O backend guarda o horário do ThingSpeak em UTC (sem fuso), então marcamos com "Z"
-// para o navegador converter para o horário local.
-const paraDataLocal = (dataHora) => new Date(`${dataHora}Z`);
-
-// A API espera data/hora ISO sem fuso, em UTC
-const paraParametro = (data) => data.toISOString().slice(0, 19);
-
-// Agrupa as leituras por hora (média), para o gráfico ficar com poucos pontos
-function agruparPorHora(leituras) {
-  const grupos = new Map();
-  leituras.forEach((l) => {
-    const d = paraDataLocal(l.dataHora);
-    const chave = new Date(d).setMinutes(0, 0, 0);
-    if (!grupos.has(chave)) grupos.set(chave, { temps: [], umids: [] });
-    grupos.get(chave).temps.push(l.temperatura);
-    grupos.get(chave).umids.push(l.umidade);
-  });
-
-  const media = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
-
-  return [...grupos.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([chave, g]) => ({
-      label: `${String(new Date(chave).getHours()).padStart(2, "0")}h`,
-      temperatura: Number(media(g.temps).toFixed(1)),
-      umidade: Number(media(g.umids).toFixed(1)),
-    }));
-}
 
 // Ajuste os nomes aqui quando eu vir o enum NivelAlerta
 const TIPO_POR_NIVEL = { INFO: "info", ATENCAO: "warning", CRITICO: "danger" };
@@ -57,7 +30,7 @@ function formatarDataHora(dataHora) {
 
 export default function Dashboard() {
   const [ultima, setUltima] = useState(null);
-  const [serie, setSerie] = useState([]);
+  const [serie, setSerie] = useState({ pontos: [], descricao: "" });
   const [alertas, setAlertas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -76,7 +49,7 @@ export default function Dashboard() {
       ]);
 
       setUltima(resUltima.data || null);
-      setSerie(agruparPorHora(resLeituras.data || []));
+      setSerie(montarSerie(resLeituras.data || []));
       setAlertas(resAlertas.data || []);
       setErro("");
     } catch (e) {
@@ -88,17 +61,19 @@ export default function Dashboard() {
 
   useEffect(() => {
     carregar();
-    const id = setInterval(carregar, 30000); // atualiza a cada 30s
+    const id = setInterval(carregar, ATUALIZACAO_MS);
     return () => clearInterval(id);
   }, []);
 
-  const temps = serie.map((p) => p.temperatura);
-  const umids = serie.map((p) => p.umidade);
-  const labels = serie.map((p) => p.label);
-  const temGrafico = serie.length >= 2;
+  const pontos = serie.pontos;
+  const temps = pontos.map((p) => p.temperatura);
+  const umids = pontos.map((p) => p.umidade);
+  const labels = pontos.map((p) => p.label);
+  const temGrafico = pontos.length >= 2;
 
   const variacaoTemp = temGrafico ? temps[temps.length - 1] - temps[0] : null;
   const umidadeOk = ultima && ultima.umidade >= FAIXA_UMIDADE[0] && ultima.umidade <= FAIXA_UMIDADE[1];
+  const subtitulo = `Últimas ${HORAS_JANELA} horas${serie.descricao ? ` • ${serie.descricao}` : ""}`;
 
   const dataExtenso = new Date()
     .toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" })
@@ -127,7 +102,7 @@ export default function Dashboard() {
           value={ultima ? `${fmt(ultima.temperatura)} °C` : "—"}
           detail={
             variacaoTemp !== null
-              ? `Atual • ${variacaoTemp >= 0 ? "+" : ""}${fmt(variacaoTemp)} °C em ${HORAS_JANELA}h`
+              ? `Atual • ${variacaoTemp >= 0 ? "+" : ""}${fmt(variacaoTemp)} °C no período do gráfico`
               : "Aguardando leituras"
           }
         />
@@ -145,7 +120,7 @@ export default function Dashboard() {
       </div>
 
       <div className="dashboard-grid">
-        <SectionCard title="Temperatura" subtitle={`Últimas ${HORAS_JANELA} horas`} action={<span className="metric-badge">°C</span>}>
+        <SectionCard title="Temperatura" subtitle={subtitulo} action={<span className="metric-badge">°C</span>}>
           {temGrafico ? (
             <>
               <div className="chart-summary">
@@ -157,24 +132,24 @@ export default function Dashboard() {
           ) : (
             <div className="empty-state">
               <strong>{carregando ? "Carregando..." : "Dados insuficientes para o gráfico."}</strong>
-              <span>São necessárias leituras em pelo menos 2 horas diferentes.</span>
+              <span>São necessárias pelo menos 2 leituras no período.</span>
             </div>
           )}
         </SectionCard>
 
-        <SectionCard title="Umidade relativa" subtitle={`Últimas ${HORAS_JANELA} horas`} action={<span className="metric-badge">%</span>}>
+        <SectionCard title="Umidade relativa" subtitle={subtitulo} action={<span className="metric-badge">%</span>}>
           {temGrafico ? (
             <>
               <div className="chart-summary">
                 <strong>{Math.round(umids[umids.length - 1])}%</strong>
-                <span>Média das últimas {HORAS_JANELA}h: {fmt(umids.reduce((a, b) => a + b, 0) / umids.length)}%</span>
+                <span>Média no período do gráfico: {fmt(umids.reduce((a, b) => a + b, 0) / umids.length)}%</span>
               </div>
               <LineChart values={umids} labels={labels} unit="%" titleFormat={(v) => `${fmt(v)}%`} stroke="#5C4AE4" gradientId="humidityGradient" />
             </>
           ) : (
             <div className="empty-state">
               <strong>{carregando ? "Carregando..." : "Dados insuficientes para o gráfico."}</strong>
-              <span>São necessárias leituras em pelo menos 2 horas diferentes.</span>
+              <span>São necessárias pelo menos 2 leituras no período.</span>
             </div>
           )}
         </SectionCard>
@@ -203,7 +178,7 @@ export default function Dashboard() {
       <div className="dashboard-footer-note">
         <Activity size={16} />
         {ultima
-          ? `Última leitura: ${paraDataLocal(ultima.dataHora).toLocaleString("pt-BR")} • atualização automática a cada 30s`
+          ? `Última leitura: ${paraDataLocal(ultima.dataHora).toLocaleString("pt-BR")} • atualização automática a cada ${ATUALIZACAO_MS / 1000}s`
           : "Aguardando a primeira leitura do sensor."}
       </div>
     </>

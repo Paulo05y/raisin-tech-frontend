@@ -1,35 +1,75 @@
 import { useMemo, useState } from "react";
 
-function smoothPath(points) {
-  if (points.length < 2) return "";
-  let d = `M ${points[0][0]} ${points[0][1]}`;
-  for (let i = 1; i < points.length; i++) {
-    const [x0, y0] = points[i - 1];
-    const [x1, y1] = points[i];
-    const midX = (x0 + x1) / 2;
-    d += ` C ${midX} ${y0}, ${midX} ${y1}, ${x1} ${y1}`;
-  }
-  return d;
+const WIDTH = 720;
+const HEIGHT = 250;
+const LEFT = 52;   // espaço para os valores do eixo vertical
+const RIGHT = 706;
+const TOP = 22;
+const BOTTOM = 202;
+const MAX_ROTULOS = 6;
+
+// Linha reta ligando os pontos (sem curva)
+function linePath(points) {
+  if (points.length === 0) return "";
+  return points.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x} ${y}`).join(" ");
 }
 
-export default function LineChart({ values, labels, unit, stroke = "#7A16F8", gradientId = "purpleGradient", titleFormat }) {
+export default function LineChart({ values, labels, unit, stroke = "#7A16F8", titleFormat }) {
   const [active, setActive] = useState(null);
-  const width = 720;
-  const height = 250;
-  const left = 14;
-  const right = 706;
-  const top = 22;
-  const bottom = 202;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const points = useMemo(() => values.map((value, index) => {
-    const x = left + (index / (values.length - 1)) * (right - left);
-    const y = bottom - ((value - min) / range) * (bottom - top);
-    return [x, y];
-  }), [values, min, range]);
-  const line = smoothPath(points);
-  const area = `${line} L ${right} ${bottom} L ${left} ${bottom} Z`;
+
+  const { points, ticks } = useMemo(() => {
+    if (!values || values.length === 0) return { points: [], ticks: [] };
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const folga = (max - min || 1) * 0.1; // margem para a linha não encostar nas bordas
+    const minEixo = min - folga;
+    const maxEixo = max + folga;
+    const faixa = maxEixo - minEixo;
+
+    const pontos = values.map((value, index) => {
+      const x = values.length === 1
+        ? (LEFT + RIGHT) / 2
+        : LEFT + (index / (values.length - 1)) * (RIGHT - LEFT);
+      const y = BOTTOM - ((value - minEixo) / faixa) * (BOTTOM - TOP);
+      return [x, y];
+    });
+
+    const casas = faixa < 5 ? 1 : 0;
+    const marcas = [0, 1, 2, 3].map((i) => {
+      const valor = maxEixo - (i / 3) * faixa;
+      return {
+        y: TOP + (i / 3) * (BOTTOM - TOP),
+        texto: valor.toFixed(casas).replace(".", ","),
+      };
+    });
+
+    return { points: pontos, ticks: marcas };
+  }, [values]);
+
+  if (points.length === 0) return null;
+
+  // Descobre o ponto mais próximo do mouse/dedo
+  function acompanhar(evento) {
+    const rect = evento.currentTarget.getBoundingClientRect();
+    const x = ((evento.clientX - rect.left) / rect.width) * WIDTH;
+    const indice = values.length === 1
+      ? 0
+      : Math.round(((x - LEFT) / (RIGHT - LEFT)) * (values.length - 1));
+    setActive(Math.min(Math.max(indice, 0), values.length - 1));
+  }
+
+  // No máximo MAX_ROTULOS horários embaixo, espalhados por igual
+  const total = labels.length;
+  const indicesRotulos = [
+    ...new Set(
+      total <= MAX_ROTULOS
+        ? labels.map((_, i) => i)
+        : Array.from({ length: MAX_ROTULOS }, (_, k) => Math.round((k * (total - 1)) / (MAX_ROTULOS - 1)))
+    ),
+  ];
+
+  const pontoAtivo = active !== null ? points[active] : null;
 
   return (
     <div className="line-chart-wrap">
@@ -41,27 +81,52 @@ export default function LineChart({ values, labels, unit, stroke = "#7A16F8", gr
           </div>
         )}
       </div>
-      <svg className="line-chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Gráfico de ${unit}`}>
-        <defs>
-          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={stroke} stopOpacity="0.20" />
-            <stop offset="100%" stopColor={stroke} stopOpacity="0.01" />
-          </linearGradient>
-        </defs>
-        {[0, 1, 2, 3].map((i) => {
-          const y = top + (i / 3) * (bottom - top);
-          return <line key={i} x1={left} x2={right} y1={y} y2={y} className="chart-grid-line" />;
-        })}
-        <path d={area} fill={`url(#${gradientId})`} className="chart-area" />
-        <path d={line} fill="none" stroke={stroke} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" className="chart-smooth-line" />
-        {points.map(([x, y], index) => (
-          <g key={index} onMouseEnter={() => setActive(index)} onMouseLeave={() => setActive(null)} className="chart-point-group">
-            <circle cx={x} cy={y} r="9" className="chart-hit-area" />
-            <circle cx={x} cy={y} r={active === index ? 5.5 : 4} fill="white" stroke={stroke} strokeWidth="3" className="chart-point" />
+
+      <svg
+        className="line-chart-svg"
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        role="img"
+        aria-label={`Gráfico de ${unit}`}
+        onPointerMove={acompanhar}
+        onPointerDown={acompanhar}
+        onPointerLeave={() => setActive(null)}
+      >
+        {ticks.map((marca) => (
+          <g key={marca.y}>
+            <line x1={LEFT} x2={RIGHT} y1={marca.y} y2={marca.y} className="chart-grid-line" />
+            <text x={LEFT - 8} y={marca.y + 4} textAnchor="end" fontSize="12" fill="#6b6580">
+              {marca.texto}
+            </text>
           </g>
         ))}
+
+        <path
+          d={linePath(points)}
+          fill="none"
+          stroke={stroke}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="chart-smooth-line"
+        />
+
+        {pontoAtivo && (
+          <g pointerEvents="none">
+            <line x1={pontoAtivo[0]} x2={pontoAtivo[0]} y1={TOP} y2={BOTTOM} stroke={stroke} strokeOpacity="0.3" strokeWidth="1" />
+            <circle cx={pontoAtivo[0]} cy={pontoAtivo[1]} r="5" fill="white" stroke={stroke} strokeWidth="3" />
+          </g>
+        )}
       </svg>
-      <div className="chart-labels">{labels.map((label) => <span key={label}>{label}</span>)}</div>
+
+      <div
+        className="chart-labels"
+        style={{
+          paddingLeft: `${(LEFT / WIDTH) * 100}%`,
+          paddingRight: `${((WIDTH - RIGHT) / WIDTH) * 100}%`,
+        }}
+      >
+        {indicesRotulos.map((i) => <span key={i}>{labels[i]}</span>)}
+      </div>
     </div>
   );
 }

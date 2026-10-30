@@ -4,40 +4,15 @@ import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import LineChart from "../components/LineChart";
 import api from "../services/api";
+import { montarSerie, paraDataLocal, paraParametro } from "../utils/serieClimatica";
 
-const HORAS_JANELA = 24;
+const HORAS_JANELA = 48;
 const MINUTOS_ONLINE = 10; // sem leitura há mais que isso = sensor offline
 const FAIXA_UMIDADE = [60, 75];
+const ATUALIZACAO_MS = 15000;
 
 const fmt = (n) => Number(n).toFixed(1).replace(".", ",");
 const media = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
-
-// O back guarda o horário do ThingSpeak em UTC (sem fuso): marcamos com "Z"
-// para o navegador converter para o horário local.
-const paraDataLocal = (dataHora) => new Date(`${dataHora}Z`);
-
-// A API espera data/hora ISO sem fuso, em UTC
-const paraParametro = (d) => d.toISOString().slice(0, 19);
-
-// Média por hora, mantendo no máximo as últimas 24 horas (rótulos sem repetição)
-function agruparPorHora(leituras) {
-  const grupos = new Map();
-  leituras.forEach((l) => {
-    const chave = new Date(paraDataLocal(l.dataHora)).setMinutes(0, 0, 0);
-    if (!grupos.has(chave)) grupos.set(chave, { temps: [], umids: [] });
-    grupos.get(chave).temps.push(l.temperatura);
-    grupos.get(chave).umids.push(l.umidade);
-  });
-
-  return [...grupos.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .slice(-HORAS_JANELA)
-    .map(([chave, g]) => ({
-      label: `${String(new Date(chave).getHours()).padStart(2, "0")}h`,
-      temperatura: Number(media(g.temps).toFixed(1)),
-      umidade: Number(media(g.umids).toFixed(1)),
-    }));
-}
 
 export default function Clima() {
   const [ultima, setUltima] = useState(null);
@@ -69,15 +44,16 @@ export default function Clima() {
 
   useEffect(() => {
     carregar();
-    const id = setInterval(carregar, 30000); // atualiza a cada 30s
+    const id = setInterval(carregar, ATUALIZACAO_MS);
     return () => clearInterval(id);
   }, []);
 
-  const serie = agruparPorHora(leituras);
-  const temps = serie.map((p) => p.temperatura);
-  const umids = serie.map((p) => p.umidade);
-  const labels = serie.map((p) => p.label);
-  const temGrafico = serie.length >= 2;
+  const serie = montarSerie(leituras);
+  const pontos = serie.pontos;
+  const temps = pontos.map((p) => p.temperatura);
+  const umids = pontos.map((p) => p.umidade);
+  const labels = pontos.map((p) => p.label);
+  const temGrafico = pontos.length >= 2;
 
   const todasTemps = leituras.map((l) => l.temperatura);
   const maxTemp = todasTemps.length ? Math.max(...todasTemps) : null;
@@ -87,6 +63,7 @@ export default function Clima() {
   const minutosSemLeitura = dataUltima ? (Date.now() - dataUltima.getTime()) / 60000 : null;
   const sensorOnline = minutosSemLeitura !== null && minutosSemLeitura <= MINUTOS_ONLINE;
   const umidadeOk = ultima && ultima.umidade >= FAIXA_UMIDADE[0] && ultima.umidade <= FAIXA_UMIDADE[1];
+  const subtitulo = `Últimas ${HORAS_JANELA} horas${serie.descricao ? ` • ${serie.descricao}` : ""}`;
 
   return (
     <>
@@ -123,7 +100,7 @@ export default function Clima() {
       </div>
 
       <div className="two-column">
-        <SectionCard title="Temperatura e umidade" subtitle={`Média por hora • últimas ${HORAS_JANELA} horas`}>
+        <SectionCard title="Temperatura e umidade" subtitle={subtitulo}>
           {temGrafico ? (
             <>
               <div className="chart-summary">
@@ -141,7 +118,7 @@ export default function Clima() {
           ) : (
             <div className="empty-state">
               <strong>{carregando ? "Carregando..." : "Dados insuficientes para o gráfico."}</strong>
-              <span>São necessárias leituras em pelo menos 2 horas diferentes nas últimas {HORAS_JANELA}h.</span>
+              <span>São necessárias pelo menos 2 leituras nas últimas {HORAS_JANELA}h.</span>
             </div>
           )}
         </SectionCard>
