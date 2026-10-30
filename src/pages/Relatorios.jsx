@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle, Clock, Download, Droplets, Info, ShieldAlert, ShieldCheck, Thermometer, XCircle,
+  Activity, AlertTriangle, Clock, Download, Droplets, Info,
+  ShieldAlert, ShieldCheck, Thermometer, XCircle,
 } from "lucide-react";
 import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import api from "../services/api";
 import { getUsuarioLogado } from "../services/authService";
+import "../styles/relatorios.css";
 
 const NIVEIS = {
   INFO: { rotulo: "Informação", icon: Info, tone: "blue" },
@@ -13,8 +15,8 @@ const NIVEIS = {
   CRITICO: { rotulo: "Crítico", icon: XCircle, tone: "purple" },
 };
 
-const TIPOS_EVENTO = {
-  LOGIN_SUCESSO: "Login com sucesso",
+const EVENTOS = {
+  LOGIN_SUCESSO: "Login realizado",
   LOGIN_FALHA: "Falha de login",
   LOGIN_USUARIO_INATIVO: "Login de usuário inativo",
   ACESSO_NEGADO: "Acesso negado",
@@ -23,26 +25,23 @@ const TIPOS_EVENTO = {
   USUARIO_DESATIVADO: "Usuário desativado",
 };
 
-const TIPOS_INCIDENTE = {
-  POSSIVEL_FORCA_BRUTA: "Possível força bruta",
-  ACESSO_NEGADO: "Acessos negados",
+const INCIDENTES = {
+  POSSIVEL_FORCA_BRUTA: "Possível tentativa de adivinhar senha",
+  ACESSO_NEGADO: "Acesso negado a recurso restrito",
 };
 
 const pad = (n) => String(n).padStart(2, "0");
 const fmt = (n) => Number(n).toFixed(1).replace(".", ",");
-const fmt2 = (n) => Number(n).toFixed(2).replace(".", ",");
 const media = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
 
 const dataISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const dataBR = (d) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 const dataHoraBR = (d) => `${dataBR(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const dataHoraCompletaBR = (d) => `${dataHoraBR(d)}:${pad(d.getSeconds())}`;
 
-// Leituras: o back guarda o horário do ThingSpeak em UTC (sem fuso)
-const leituraParaLocal = (dataHora) => new Date(`${dataHora}Z`);
+// Leituras e eventos de segurança: o back guarda em UTC (sem fuso)
+const utcParaLocal = (dataHora) => new Date(`${dataHora}Z`);
 const paramUTC = (d) => d.toISOString().slice(0, 19);
-
-// Eventos de segurança: o back grava em UTC (sem fuso). Cortamos nos segundos e somamos "Z"
-const segurancaParaLocal = (dataHora) => new Date(`${String(dataHora).slice(0, 19)}Z`);
 
 // Alertas: o back grava com o relógio do servidor (horário local, sem fuso)
 const alertaParaLocal = (dataHora) => new Date(dataHora);
@@ -76,9 +75,9 @@ function baixarCSV(nomeArquivo, cabecalho, linhas) {
   URL.revokeObjectURL(url);
 }
 
-function SeletorPeriodo({ dias, setDias }) {
+function SeletorPeriodo({ dias, onChange }) {
   return (
-    <select value={dias} onChange={(e) => setDias(Number(e.target.value))} aria-label="Período do relatório">
+    <select value={dias} onChange={(e) => onChange(Number(e.target.value))} aria-label="Período do relatório">
       <option value={7}>Últimos 7 dias</option>
       <option value={14}>Últimos 14 dias</option>
       <option value={30}>Últimos 30 dias</option>
@@ -86,9 +85,10 @@ function SeletorPeriodo({ dias, setDias }) {
   );
 }
 
-/* ===================== ABA OPERACIONAL ===================== */
+/* ============================ ABA OPERACIONAL ============================ */
 
-function AbaOperacional({ dias, setDias, onNotice }) {
+function RelatorioOperacional({ onNotice }) {
+  const [dias, setDias] = useState(7);
   const [leituras, setLeituras] = useState([]);
   const [alertas, setAlertas] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -127,7 +127,7 @@ function AbaOperacional({ dias, setDias, onNotice }) {
   const resumoDiario = useMemo(() => {
     const mapa = new Map();
     leituras.forEach((l) => {
-      const chave = dataISO(leituraParaLocal(l.dataHora));
+      const chave = dataISO(utcParaLocal(l.dataHora));
       if (!mapa.has(chave)) mapa.set(chave, { temps: [], umids: [] });
       mapa.get(chave).temps.push(l.temperatura);
       mapa.get(chave).umids.push(l.umidade);
@@ -217,7 +217,7 @@ function AbaOperacional({ dias, setDias, onNotice }) {
       <SectionCard
         title="Relatório operacional"
         subtitle={`${dataBR(inicio)} a ${dataBR(fim)} • dados do sensor e alertas`}
-        action={<SeletorPeriodo dias={dias} setDias={setDias} />}
+        action={<SeletorPeriodo dias={dias} onChange={setDias} />}
       >
         {erro && <div className="filter-feedback error" role="alert">{erro}</div>}
 
@@ -301,9 +301,10 @@ function AbaOperacional({ dias, setDias, onNotice }) {
   );
 }
 
-/* ===================== ABA SEGURANÇA (só ADMINISTRADOR) ===================== */
+/* ============================= ABA SEGURANÇA ============================= */
 
-function AbaSeguranca({ dias, setDias, onNotice }) {
+function RelatorioSeguranca({ onNotice }) {
+  const [dias, setDias] = useState(7);
   const [relatorio, setRelatorio] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -315,20 +316,18 @@ function AbaSeguranca({ dias, setDias, onNotice }) {
       setCarregando(true);
       try {
         const { inicio, fim } = periodo(dias);
-        // Datas enviadas em UTC (o back grava os eventos em UTC)
         const res = await api.get("/api/relatorios/seguranca", {
           params: { inicio: paramUTC(inicio), fim: paramUTC(fim) },
         });
         if (!cancelado) {
-          setRelatorio(res.data);
+          setRelatorio(res.data || null);
           setErro("");
         }
       } catch (e) {
         if (!cancelado) {
-          setRelatorio(null);
           setErro(
             e.response?.status === 403
-              ? "Você não tem permissão para ver o relatório de segurança."
+              ? "Somente administradores podem ver o relatório de segurança."
               : "Não foi possível carregar o relatório de segurança."
           );
         }
@@ -343,39 +342,10 @@ function AbaSeguranca({ dias, setDias, onNotice }) {
     };
   }, [dias]);
 
-  const eventos = useMemo(
-    () =>
-      [...(relatorio?.eventos || [])].sort(
-        (a, b) => segurancaParaLocal(b.dataHora) - segurancaParaLocal(a.dataHora)
-      ),
-    [relatorio]
-  );
-  const incidentes = relatorio?.incidentes || [];
   const totais = relatorio?.totaisPorTipo || {};
-  const total = relatorio?.totalEventos ?? 0;
-  const sucessos = totais.LOGIN_SUCESSO || 0;
-  const falhas = totais.LOGIN_FALHA || 0;
-  const negados = totais.ACESSO_NEGADO || 0;
-
-  // Comentário calculado com os valores reais
-  const comentario = useMemo(() => {
-    if (!relatorio) return "";
-    if (total === 0) return "Nenhum evento de segurança foi registrado no período.";
-    const forca = incidentes.filter((i) => i.tipo === "POSSIVEL_FORCA_BRUTA");
-    let texto = `Foram registrados ${total} eventos no período: ${sucessos} logins com sucesso, ${falhas} falhas de login e ${negados} acessos negados. `;
-    if (incidentes.length === 0) {
-      texto += "Nenhum incidente foi detectado.";
-    } else {
-      texto += `${incidentes.length} incidente(s) detectado(s)`;
-      if (forca.length > 0) {
-        const maior = [...forca].sort((a, b) => b.ocorrencias - a.ocorrencias)[0];
-        texto += `, sendo ${forca.length} de possível força bruta (maior caso: ${maior.email} com ${maior.ocorrencias} falhas).`;
-      } else {
-        texto += ".";
-      }
-    }
-    return texto;
-  }, [relatorio, total, sucessos, falhas, negados, incidentes]);
+  const eventos = relatorio?.eventos || [];
+  const incidentes = relatorio?.incidentes || [];
+  const { inicio, fim } = periodo(dias);
 
   function exportarEventos() {
     if (!eventos.length) {
@@ -384,111 +354,97 @@ function AbaSeguranca({ dias, setDias, onNotice }) {
     }
     baixarCSV(
       `eventos-seguranca-ultimos-${dias}-dias.csv`,
-      ["Data e hora", "Tipo", "E-mail", "IP", "Detalhe"],
-      eventos.map((e) => [
-        dataHoraBR(segurancaParaLocal(e.dataHora)),
-        TIPOS_EVENTO[e.tipo] || e.tipo,
-        e.email,
-        e.ip,
-        e.detalhe,
+      ["Data e hora", "Evento", "Usuário", "IP", "Detalhe"],
+      eventos.map((ev) => [
+        dataHoraCompletaBR(utcParaLocal(ev.dataHora)),
+        EVENTOS[ev.tipo] || ev.tipo,
+        ev.email || "",
+        ev.ip || "",
+        ev.detalhe || "",
       ])
     );
     onNotice("Eventos de segurança exportados em CSV.");
   }
 
-  const { inicio, fim } = periodo(dias);
-
   return (
     <>
       <SectionCard
         title="Relatório de segurança"
-        subtitle={`${dataBR(inicio)} a ${dataBR(fim)} • acessos e incidentes (horário local)`}
-        action={<SeletorPeriodo dias={dias} setDias={setDias} />}
+        subtitle={`${dataBR(inicio)} a ${dataBR(fim)} • acessos e incidentes`}
+        action={<SeletorPeriodo dias={dias} onChange={setDias} />}
       >
         {erro && <div className="filter-feedback error" role="alert">{erro}</div>}
 
         <div className="stats-grid">
           <StatCard
+            icon={Activity}
+            label="Eventos registrados"
+            value={carregando ? "—" : relatorio?.totalEventos ?? 0}
+            detail="Todos os tipos, no período"
+          />
+          <StatCard
             icon={ShieldCheck}
-            label="Eventos no período"
-            value={carregando ? "—" : total}
-            detail={carregando ? "Carregando..." : `${sucessos} logins com sucesso`}
+            label="Logins com sucesso"
+            value={carregando ? "—" : totais.LOGIN_SUCESSO ?? 0}
+            detail="Acessos autorizados"
+            tone="blue"
           />
           <StatCard
             icon={AlertTriangle}
             label="Falhas de login"
-            value={carregando ? "—" : falhas}
-            detail="Senha ou e-mail incorretos"
+            value={carregando ? "—" : (totais.LOGIN_FALHA ?? 0) + (totais.LOGIN_USUARIO_INATIVO ?? 0)}
+            detail={`${totais.LOGIN_USUARIO_INATIVO ?? 0} de usuário inativo`}
             tone="orange"
           />
           <StatCard
-            icon={XCircle}
+            icon={ShieldAlert}
             label="Acessos negados"
-            value={carregando ? "—" : negados}
+            value={carregando ? "—" : totais.ACESSO_NEGADO ?? 0}
             detail="Usuário logado sem permissão"
             tone="purple"
           />
-          <StatCard
-            icon={ShieldAlert}
-            label="Incidentes"
-            value={carregando ? "—" : incidentes.length}
-            detail="Força bruta e acessos negados"
-            tone="blue"
-          />
         </div>
 
-        {!carregando && relatorio && <p style={{ marginTop: 12 }}>{comentario}</p>}
-      </SectionCard>
-
-      <SectionCard title="Incidentes" subtitle="Padrões suspeitos detectados no período">
-        <div className="table-wrap">
-          {carregando ? (
-            <div className="empty-state"><strong>Carregando...</strong></div>
-          ) : incidentes.length === 0 ? (
-            <div className="empty-state">
-              <strong>Nenhum incidente no período.</strong>
-              <span>Força bruta = 5 ou mais falhas de login do mesmo e-mail em até 15 minutos.</span>
-            </div>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Tipo</th><th>E-mail</th><th>Ocorrências</th><th>Última ocorrência</th><th>Descrição</th>
-                </tr>
-              </thead>
-              <tbody>
-                {incidentes.map((i, idx) => (
-                  <tr key={`${i.tipo}-${i.email}-${idx}`}>
-                    <td>
-                      <strong style={{ color: i.tipo === "POSSIVEL_FORCA_BRUTA" ? "#b91c1c" : "#b45309" }}>
-                        {TIPOS_INCIDENTE[i.tipo] || i.tipo}
-                      </strong>
-                    </td>
-                    <td>{i.email || "—"}</td>
-                    <td>{i.ocorrencias}</td>
-                    <td>{i.ultimaOcorrencia ? dataHoraBR(segurancaParaLocal(i.ultimaOcorrencia)) : "—"}</td>
-                    <td>{i.descricao}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        <h3 className="report-subtitle">Incidentes</h3>
+        {carregando ? (
+          <div className="empty-state"><strong>Carregando...</strong></div>
+        ) : incidentes.length === 0 ? (
+          <div className="report-ok">Nenhum incidente de segurança no período.</div>
+        ) : (
+          <div className="incident-list">
+            {incidentes.map((inc) => (
+              <div className="incident-item" key={`${inc.tipo}-${inc.email}`}>
+                <div className="incident-icon"><ShieldAlert size={20} /></div>
+                <div>
+                  <strong>{INCIDENTES[inc.tipo] || inc.tipo}</strong>
+                  <p>{inc.descricao}</p>
+                  <small>
+                    Usuário: {inc.email} • {inc.ocorrencias} {inc.ocorrencias === 1 ? "ocorrência" : "ocorrências"} •
+                    última em {dataHoraCompletaBR(utcParaLocal(inc.ultimaOcorrencia))}
+                  </small>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </SectionCard>
 
       <SectionCard
         title="Eventos recentes"
-        subtitle={
-          eventos.length >= 200
-            ? "Mostrando os 200 eventos mais recentes do período"
-            : `${eventos.length} evento(s) no período`
-        }
+        subtitle="Logins, acessos negados e mudanças de usuários"
         action={
           <button className="secondary-button small" onClick={exportarEventos} disabled={carregando}>
             <Download size={16} /> Exportar eventos (CSV)
           </button>
         }
       >
+        <div className="report-note">
+          Os registros guardam e-mail, IP e horário, nunca senhas. O IP é informativo e serve apenas à segurança do sistema.
+          {relatorio && relatorio.totalEventos > eventos.length
+            ? ` Mostrando os ${eventos.length} eventos mais recentes de ${relatorio.totalEventos}.`
+            : ""}
+        </div>
+
         <div className="table-wrap">
           {carregando ? (
             <div className="empty-state"><strong>Carregando...</strong></div>
@@ -501,17 +457,25 @@ function AbaSeguranca({ dias, setDias, onNotice }) {
             <table>
               <thead>
                 <tr>
-                  <th>Data e hora</th><th>Tipo</th><th>E-mail</th><th>IP</th><th>Detalhe</th>
+                  <th>Data e hora</th><th>Evento</th><th>Usuário</th><th>IP</th><th>Detalhe</th>
                 </tr>
               </thead>
               <tbody>
-                {eventos.map((e) => (
-                  <tr key={e.id}>
-                    <td>{dataHoraBR(segurancaParaLocal(e.dataHora))}</td>
-                    <td>{TIPOS_EVENTO[e.tipo] || e.tipo}</td>
-                    <td>{e.email || "—"}</td>
-                    <td>{e.ip || "—"}</td>
-                    <td>{e.detalhe || "—"}</td>
+                {eventos.map((ev) => (
+                  <tr key={ev.id}>
+                    <td>{dataHoraCompletaBR(utcParaLocal(ev.dataHora))}</td>
+                    <td>
+                      {ev.tipo === "LOGIN_SUCESSO" ? (
+                        <span className="tag success">{EVENTOS[ev.tipo]}</span>
+                      ) : ["LOGIN_FALHA", "LOGIN_USUARIO_INATIVO", "ACESSO_NEGADO"].includes(ev.tipo) ? (
+                        <span className="tag orange">{EVENTOS[ev.tipo]}</span>
+                      ) : (
+                        <span>{EVENTOS[ev.tipo] || ev.tipo}</span>
+                      )}
+                    </td>
+                    <td>{ev.email || "—"}</td>
+                    <td>{ev.ip || "—"}</td>
+                    <td>{ev.detalhe || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -523,10 +487,10 @@ function AbaSeguranca({ dias, setDias, onNotice }) {
   );
 }
 
-/* ===================== ABA QUALIDADE ===================== */
+/* ============================= ABA QUALIDADE ============================= */
 
-function AbaQualidade() {
-  const [relatorio, setRelatorio] = useState(null);
+function RelatorioQualidade() {
+  const [dados, setDados] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
@@ -534,17 +498,19 @@ function AbaQualidade() {
     let cancelado = false;
 
     async function carregar() {
-      setCarregando(true);
       try {
         const res = await api.get("/api/relatorios/qualidade");
         if (!cancelado) {
-          setRelatorio(res.data);
+          setDados(res.data || null);
           setErro("");
         }
       } catch (e) {
         if (!cancelado) {
-          setRelatorio(null);
-          setErro("Não foi possível carregar o relatório de qualidade. Ele pode ainda não ter sido gerado no servidor.");
+          setErro(
+            e.response?.status === 404
+              ? "O relatório de qualidade ainda não foi gerado. Rode os testes e o script gerar_relatorio_qualidade.py no back."
+              : "Não foi possível carregar o relatório de qualidade."
+          );
         }
       } finally {
         if (!cancelado) setCarregando(false);
@@ -557,28 +523,11 @@ function AbaQualidade() {
     };
   }, []);
 
-  const resumo = relatorio?.resumo;
-  const classes = relatorio?.classes || [];
-  const problemas = relatorio?.casosComProblema || [];
-
-  // Comentário calculado com os valores reais
-  const comentario = useMemo(() => {
-    if (!resumo) return "";
-    const pct = resumo.total ? (resumo.aprovados / resumo.total) * 100 : 0;
-    let texto = `${resumo.aprovados} de ${resumo.total} testes aprovados (${fmt(pct)}%) em ${fmt2(resumo.tempoSegundos)} s. `;
-    if (resumo.falhas + resumo.erros === 0) {
-      texto += "Nenhuma falha ou erro. ";
-    } else {
-      texto += `Há ${resumo.falhas} falha(s) e ${resumo.erros} erro(s) para corrigir. `;
-    }
-    if (classes.length > 0) {
-      const maior = [...classes].sort((a, b) => b.total - a.total)[0];
-      texto += `A área com mais testes é "${maior.area}" (${maior.total}).`;
-    }
-    return texto;
-  }, [resumo, classes]);
-
-  const geradoEm = relatorio?.geradoEm ? dataHoraBR(new Date(relatorio.geradoEm)) : null;
+  const resumo = dados?.resumo;
+  const classes = dados?.classes || [];
+  const problemas = dados?.casosComProblema || [];
+  const falhasTotal = resumo ? resumo.falhas + resumo.erros : 0;
+  const geradoEm = dados?.geradoEm ? new Date(dados.geradoEm) : null;
 
   return (
     <>
@@ -586,57 +535,45 @@ function AbaQualidade() {
         title="Relatório de qualidade"
         subtitle={
           geradoEm
-            ? `Testes automatizados (JUnit 5 + Mockito) • gerado em ${geradoEm}`
-            : "Testes automatizados (JUnit 5 + Mockito)"
+            ? `Execução dos testes automatizados • gerado em ${dataHoraBR(geradoEm)}`
+            : "Execução dos testes automatizados"
         }
       >
         {erro && <div className="filter-feedback error" role="alert">{erro}</div>}
 
-        <div className="stats-grid">
-          <StatCard
-            icon={Info}
-            label="Total de testes"
-            value={resumo ? resumo.total : "—"}
-            detail={carregando ? "Carregando..." : `${classes.length} áreas testadas`}
-            tone="blue"
-          />
-          <StatCard
-            icon={ShieldCheck}
-            label="Aprovados"
-            value={resumo ? resumo.aprovados : "—"}
-            detail={resumo ? `${resumo.ignorados} ignorados` : ""}
-          />
-          <StatCard
-            icon={XCircle}
-            label="Falhas e erros"
-            value={resumo ? resumo.falhas + resumo.erros : "—"}
-            detail={resumo ? `${resumo.falhas} falhas • ${resumo.erros} erros` : ""}
-            tone="purple"
-          />
-          <StatCard
-            icon={Clock}
-            label="Tempo de execução"
-            value={resumo ? `${fmt2(resumo.tempoSegundos)} s` : "—"}
-            detail="Soma de todas as áreas"
-            tone="orange"
-          />
-        </div>
+        {resumo && (
+          <>
+            {falhasTotal === 0 ? (
+              <div className="report-ok">
+                Todos os {resumo.total} testes da última execução passaram.
+              </div>
+            ) : (
+              <div className="report-problem">
+                {falhasTotal} {falhasTotal === 1 ? "teste não passou" : "testes não passaram"} na última execução.
+              </div>
+            )}
 
-        {resumo && <p style={{ marginTop: 12 }}>{comentario}</p>}
+            <div className="stats-grid">
+              <StatCard icon={Activity} label="Testes executados" value={resumo.total} detail={`${classes.length} classes de teste`} />
+              <StatCard icon={ShieldCheck} label="Aprovados" value={resumo.aprovados} detail={`${resumo.ignorados} ignorados`} tone="blue" />
+              <StatCard icon={XCircle} label="Falhas e erros" value={falhasTotal} detail={`${resumo.falhas} falhas • ${resumo.erros} erros`} tone="orange" />
+              <StatCard icon={Clock} label="Tempo de execução" value={`${fmt(resumo.tempoSegundos)} s`} detail="Soma de todas as classes" tone="purple" />
+            </div>
+          </>
+        )}
+
+        {!resumo && !erro && (
+          <div className="empty-state"><strong>{carregando ? "Carregando..." : "Sem dados de qualidade."}</strong></div>
+        )}
       </SectionCard>
 
-      <SectionCard title="Testes por área" subtitle="Resultado de cada classe de teste">
-        <div className="table-wrap">
-          {carregando ? (
-            <div className="empty-state"><strong>Carregando...</strong></div>
-          ) : classes.length === 0 ? (
-            <div className="empty-state"><strong>Sem dados de testes.</strong></div>
-          ) : (
+      {resumo && (
+        <SectionCard title="Testes por área" subtitle="Cada linha é uma classe de teste automatizado">
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Área</th><th>Classe</th><th>Testes</th><th>Aprovados</th>
-                  <th>Falhas</th><th>Erros</th><th>Ignorados</th><th>Tempo</th>
+                  <th>Área</th><th>Classe</th><th>Testes</th><th>Aprovados</th><th>Falhas / erros</th><th>Tempo</th>
                 </tr>
               </thead>
               <tbody>
@@ -646,57 +583,45 @@ function AbaQualidade() {
                     <td>{c.nome}</td>
                     <td>{c.total}</td>
                     <td>{c.aprovados}</td>
-                    <td>{c.falhas}</td>
-                    <td>{c.erros}</td>
-                    <td>{c.ignorados}</td>
-                    <td>{fmt2(c.tempoSegundos)} s</td>
+                    <td>
+                      <span className={`tag ${c.falhas + c.erros === 0 ? "success" : "orange"}`}>
+                        {c.falhas + c.erros}
+                      </span>
+                    </td>
+                    <td>{fmt(c.tempoSegundos)} s</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </div>
-      </SectionCard>
+          </div>
 
-      <SectionCard title="Casos com problema" subtitle="Testes que falharam ou deram erro">
-        <div className="table-wrap">
-          {carregando ? (
-            <div className="empty-state"><strong>Carregando...</strong></div>
-          ) : problemas.length === 0 ? (
-            <div className="empty-state">
-              <strong>Nenhum caso com problema.</strong>
-              <span>Todos os testes da última execução passaram.</span>
-            </div>
-          ) : (
-            <table>
-              <thead>
-                <tr><th>Classe</th><th>Teste</th><th>Mensagem</th></tr>
-              </thead>
-              <tbody>
-                {problemas.map((p, idx) => (
-                  <tr key={`${p.classe}-${p.teste}-${idx}`}>
-                    <td>{p.classe}</td>
-                    <td>{p.teste}</td>
-                    <td>{p.mensagem}</td>
-                  </tr>
+          {problemas.length > 0 && (
+            <>
+              <h3 className="report-subtitle">Testes com problema</h3>
+              <div className="incident-list">
+                {problemas.map((p) => (
+                  <div className="incident-item" key={`${p.classe}-${p.teste}`}>
+                    <div className="incident-icon"><XCircle size={20} /></div>
+                    <div>
+                      <strong>{p.classe} • {p.teste}</strong>
+                      <p>{p.mensagem}</p>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            </>
           )}
-        </div>
-      </SectionCard>
+        </SectionCard>
+      )}
     </>
   );
 }
 
-/* ===================== PÁGINA (ABAS) ===================== */
+/* ================================= TELA ================================= */
 
 export default function Relatorios({ onNotice }) {
   const usuario = getUsuarioLogado();
   const ehAdmin = usuario?.perfil === "ADMINISTRADOR";
-
-  const [aba, setAba] = useState("operacional");
-  const [dias, setDias] = useState(7);
 
   const abas = [
     { id: "operacional", rotulo: "Operacional" },
@@ -704,36 +629,28 @@ export default function Relatorios({ onNotice }) {
     { id: "qualidade", rotulo: "Qualidade" },
   ];
 
+  const [aba, setAba] = useState("operacional");
+
   return (
     <>
-      <div
-        role="tablist"
-        aria-label="Tipos de relatório"
-        style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}
-      >
-        {abas.map((a) => {
-          const ativa = aba === a.id;
-          return (
-            <button
-              key={a.id}
-              role="tab"
-              aria-selected={ativa}
-              className="secondary-button small"
-              onClick={() => setAba(a.id)}
-              style={{
-                fontWeight: ativa ? 700 : 500,
-                borderBottom: ativa ? "3px solid currentColor" : "3px solid transparent",
-              }}
-            >
-              {a.rotulo}
-            </button>
-          );
-        })}
+      <div className="report-tabs" role="tablist">
+        {abas.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            role="tab"
+            aria-selected={aba === a.id}
+            className={`report-tab ${aba === a.id ? "active" : ""}`}
+            onClick={() => setAba(a.id)}
+          >
+            {a.rotulo}
+          </button>
+        ))}
       </div>
 
-      {aba === "operacional" && <AbaOperacional dias={dias} setDias={setDias} onNotice={onNotice} />}
-      {aba === "seguranca" && ehAdmin && <AbaSeguranca dias={dias} setDias={setDias} onNotice={onNotice} />}
-      {aba === "qualidade" && <AbaQualidade />}
+      {aba === "operacional" && <RelatorioOperacional onNotice={onNotice} />}
+      {aba === "seguranca" && ehAdmin && <RelatorioSeguranca onNotice={onNotice} />}
+      {aba === "qualidade" && <RelatorioQualidade />}
     </>
   );
 }

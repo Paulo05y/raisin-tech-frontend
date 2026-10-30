@@ -5,9 +5,9 @@ import SectionCard from "../components/SectionCard";
 import LineChart from "../components/LineChart";
 import api from "../services/api";
 import { montarSerie, paraDataLocal, paraParametro } from "../utils/serieClimatica";
+import { FAIXA_UMIDADE } from "../utils/criterios";
 
 const HORAS_JANELA = 12;
-const FAIXA_UMIDADE = [60, 75];
 const ATUALIZACAO_MS = 15000;
 
 const fmt = (n) => Number(n).toFixed(1).replace(".", ",");

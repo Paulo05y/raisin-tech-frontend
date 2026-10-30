@@ -1,28 +1,18 @@
 import { useEffect, useState } from "react";
-import { Cloud, CloudRain, CloudSun, Droplets, PackageCheck, Sun, Thermometer } from "lucide-react";
+import { Cloud, CloudRain, CloudSun, Droplets, PackageCheck, Sun, Thermometer, TrendingUp } from "lucide-react";
 import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
+import api from "../services/api";
+import "../styles/previsoes.css";
 
-const LOCAL = { nome: "Petrolina / Juazeiro", lat: -9.39, lon: -40.5 };
-
-// Critérios para um dia ser "favorável" à colheita (ajuste conforme o projeto)
-const TEMP_MAX = 34;            // °C, máxima do dia
-const UMIDADE = [50, 80];       // %, média do dia
-const CHANCE_CHUVA_MAX = 30;    // %, probabilidade máxima de chuva
-const CHUVA_MM_MAX = 1;         // mm no dia
-const MIN_DIAS_JANELA = 2;      // mínimo de dias seguidos para formar uma janela
-
-const URL =
-  `https://api.open-meteo.com/v1/forecast?latitude=${LOCAL.lat}&longitude=${LOCAL.lon}` +
-  `&current=temperature_2m,relative_humidity_2m,weather_code` +
-  `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max` +
-  `&hourly=relative_humidity_2m&timezone=America%2FRecife&forecast_days=7`;
+const ATUALIZACAO_MS = 10 * 60 * 1000; // o back guarda a previsão em memória por 10 min
 
 const fmt = (n) => Number(n).toFixed(1).replace(".", ",");
-const media = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+const sinal = (n) => `${n > 0 ? "+" : ""}${fmt(n)}`;
 
 // Códigos WMO usados pela Open-Meteo
 function condicao(codigo) {
+  if (codigo === null || codigo === undefined) return { texto: "—", icon: Cloud };
   if (codigo === 0) return { texto: "Céu limpo", icon: Sun };
   if (codigo <= 2) return { texto: "Parcialmente nublado", icon: CloudSun };
   if (codigo <= 3) return { texto: "Nublado", icon: Cloud };
@@ -41,105 +31,130 @@ const diaMes = (data) =>
     .replace(".", "")
     .toUpperCase();
 
-function montarDias(dados) {
-  const d = dados.daily;
-  return d.time.map((data, i) => {
-    const umids = dados.hourly.time
-      .map((t, idx) => (t.startsWith(data) ? dados.hourly.relative_humidity_2m[idx] : null))
-      .filter((v) => v !== null);
-    const umidade = umids.length ? media(umids) : null;
-    const tmax = d.temperature_2m_max[i];
-    const chance = d.precipitation_probability_max[i] ?? 0;
-    const chuvaMm = d.precipitation_sum[i] ?? 0;
-
-    const favoravel =
-      tmax <= TEMP_MAX &&
-      umidade !== null && umidade >= UMIDADE[0] && umidade <= UMIDADE[1] &&
-      chance <= CHANCE_CHUVA_MAX &&
-      chuvaMm <= CHUVA_MM_MAX;
-
-    return {
-      data,
-      tmax,
-      tmin: d.temperature_2m_min[i],
-      umidade,
-      chance,
-      chuvaMm,
-      codigo: d.weather_code[i],
-      favoravel,
-    };
-  });
-}
-
-// Maior sequência de dias favoráveis seguidos
-function acharJanela(dias) {
-  let melhor = null;
-  let inicio = null;
-  dias.forEach((dia, i) => {
-    if (dia.favoravel && inicio === null) inicio = i;
-    const fimSequencia = inicio !== null && (!dia.favoravel || i === dias.length - 1);
-    if (fimSequencia) {
-      const fim = dia.favoravel ? i : i - 1;
-      const tamanho = fim - inicio + 1;
-      if (tamanho >= MIN_DIAS_JANELA && (!melhor || tamanho > melhor.tamanho)) {
-        melhor = { inicio: dias[inicio].data, fim: dias[fim].data, tamanho };
-      }
-      inicio = null;
-    }
-  });
-  return melhor;
-}
-
 export default function Previsoes() {
+  const [produtos, setProdutos] = useState([]);
+  const [produto, setProduto] = useState(null); // null = ainda carregando a lista de variedades
   const [dados, setDados] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
-  async function carregar() {
-    try {
-      const res = await fetch(URL);
-      if (!res.ok) throw new Error(res.status);
-      setDados(await res.json());
-      setErro("");
-    } catch (e) {
-      setErro("Não foi possível carregar a previsão do tempo. Tente novamente em instantes.");
-    } finally {
-      setCarregando(false);
-    }
-  }
-
+  // 1) Lista de variedades (dados de mercado)
   useEffect(() => {
-    carregar();
-    const id = setInterval(carregar, 30 * 60 * 1000); // atualiza a cada 30 min
-    return () => clearInterval(id);
+    let cancelado = false;
+
+    async function carregarProdutos() {
+      try {
+        const res = await api.get("/api/dados-mercado");
+        const nomes = [...new Set((res.data || []).map((r) => r.produto))].sort();
+        if (!cancelado) {
+          setProdutos(nomes);
+          setProduto(nomes[0] ?? "");
+        }
+      } catch (e) {
+        if (!cancelado) {
+          setProdutos([]);
+          setProduto("");
+        }
+      }
+    }
+
+    carregarProdutos();
+    return () => {
+      cancelado = true;
+    };
   }, []);
 
-  if (carregando) return <div className="empty-state"><strong>Carregando previsão...</strong></div>;
-  if (erro || !dados) return <div className="filter-feedback error" role="alert">{erro}</div>;
+  // 2) Previsão (de novo a cada troca de variedade e a cada 10 minutos)
+  useEffect(() => {
+    if (produto === null) return undefined;
+    let cancelado = false;
 
-  const dias = montarDias(dados);
-  const janela = acharJanela(dias);
-  const diasFavoraveis = dias.filter((x) => x.favoravel).length;
+    async function carregar() {
+      try {
+        const res = await api.get("/api/previsoes", { params: produto ? { produto } : {} });
+        if (!cancelado) {
+          setDados(res.data);
+          setErro("");
+        }
+      } catch (e) {
+        if (!cancelado) setErro("Não foi possível gerar a previsão. Tente novamente em instantes.");
+      } finally {
+        if (!cancelado) setCarregando(false);
+      }
+    }
 
-  // Estável: sem chuva provável e pouca variação da máxima ao longo da semana
-  const maximas = dias.map((x) => x.tmax);
-  const variacao = Math.max(...maximas) - Math.min(...maximas);
-  const semChuva = dias.every((x) => x.chance <= 50);
-  const estavel = semChuva && variacao <= 4;
+    setCarregando(true);
+    carregar();
+    const id = setInterval(carregar, ATUALIZACAO_MS);
+    return () => {
+      cancelado = true;
+      clearInterval(id);
+    };
+  }, [produto]);
 
-  const atual = dados.current;
-  const condAtual = condicao(atual.weather_code);
+  if (!dados && carregando) return <div className="empty-state"><strong>Gerando previsão...</strong></div>;
+  if (!dados) return <div className="filter-feedback error" role="alert">{erro || "Sem dados de previsão."}</div>;
+
+  const { atual, criterios: c, calibracao, dias, janelaColheita: janela, exportacao } = dados;
+
+  const total = dias.length;
+  const diasFavoraveis = dias.filter((d) => d.favoravel).length;
+  const contTemp = dias.filter(
+    (d) => d.tempMax != null && d.tempMin != null && d.tempMax <= c.temperaturaMaxima && d.tempMin >= c.temperaturaMinima
+  ).length;
+  const contUmid = dias.filter(
+    (d) => d.umidade != null && d.umidade >= c.umidadeMinima && d.umidade <= c.umidadeMaxima
+  ).length;
+  const contChuva = dias.filter((d) => d.chanceChuva <= c.chanceChuvaMaxima && d.chuvaMm <= c.chuvaMmMaxima).length;
+
+  const condAtual = condicao(atual?.codigoTempo);
+  const horaGerada = dados.geradoEm ? dados.geradoEm.slice(11, 16) : "";
+
+  let rotuloExportacao = "Sem dados";
+  if (exportacao.temDados) rotuloExportacao = exportacao.favoravel ? "Favorável" : "Desfavorável";
 
   return (
     <>
+      {erro && <div className="filter-feedback error" role="alert">{erro}</div>}
+
       <div className="stats-grid">
-        <StatCard icon={Thermometer} label="Temperatura agora" value={`${fmt(atual.temperature_2m)} °C`} detail={LOCAL.nome} />
-        <StatCard icon={Droplets} label="Umidade agora" value={`${Math.round(atual.relative_humidity_2m)}%`} detail="Previsão para o local" tone="blue" />
-        <StatCard icon={condAtual.icon} label="Condição" value={condAtual.texto} detail={estavel ? "Tempo estável na semana" : "Tempo instável na semana"} tone="orange" />
-        <StatCard icon={PackageCheck} label="Janela de colheita" value={janela ? "Ideal" : "Indisponível"} detail={`${diasFavoraveis} de 7 dias favoráveis`} tone="purple" />
+        <StatCard
+          icon={Thermometer}
+          label="Temperatura agora"
+          value={atual?.temperatura != null ? `${fmt(atual.temperatura)} °C` : "—"}
+          detail={`${dados.local} • modelo meteorológico`}
+        />
+        <StatCard
+          icon={Droplets}
+          label="Umidade agora"
+          value={atual?.umidade != null ? `${Math.round(atual.umidade)}%` : "—"}
+          detail={condAtual.texto}
+          tone="blue"
+        />
+        <StatCard
+          icon={PackageCheck}
+          label="Janela de colheita"
+          value={janela ? "Ideal" : "Indisponível"}
+          detail={`${diasFavoraveis} de ${total} dias favoráveis`}
+          tone="purple"
+        />
+        <StatCard
+          icon={TrendingUp}
+          label="Exportação"
+          value={rotuloExportacao}
+          detail={exportacao.produto || "Sem variedade selecionada"}
+          tone="orange"
+        />
       </div>
 
-      <SectionCard title="Janela ideal de colheita" subtitle={`Próximos 7 dias • ${LOCAL.nome}`}>
+      <SectionCard
+        title="Janela ideal de colheita"
+        subtitle={`Próximos ${total} dias • ${dados.local}${horaGerada ? ` • atualizado às ${horaGerada}` : ""}`}
+      >
+        <p className="previsao-resumo">{dados.resumo}</p>
+
+        <div className={`previsao-nota ${calibracao.aplicada ? "ok" : "aviso"}`}>{calibracao.mensagem}</div>
+
         <div className="forecast-highlight">
           <div className="forecast-icon"><Sun size={28} /></div>
           <div>
@@ -147,36 +162,113 @@ export default function Previsoes() {
             <strong>{janela ? `${diaMes(janela.inicio)} — ${diaMes(janela.fim)}` : "—"}</strong>
             <p>
               {janela
-                ? `${janela.tamanho} dias seguidos com temperatura, umidade e chuva dentro dos critérios.`
-                : `Nenhuma sequência de ${MIN_DIAS_JANELA} dias favoráveis nos próximos 7 dias.`}
+                ? `${janela.dias} dias seguidos dentro de todos os critérios.`
+                : `Nenhuma sequência de ${c.minDiasJanela} dias favoráveis nos próximos ${total} dias.`}
             </p>
           </div>
-          <div className="confidence"><strong>{diasFavoraveis}/7</strong><span>dias favoráveis</span></div>
+          <div className="confidence"><strong>{diasFavoraveis}/{total}</strong><span>dias favoráveis</span></div>
         </div>
+
         <div className="condition-grid">
-          <div><Thermometer size={18} /><span>Temperatura máx. ≤ {TEMP_MAX} °C</span><strong>{dias.filter((x) => x.tmax <= TEMP_MAX).length}/7 dias</strong></div>
-          <div><Droplets size={18} /><span>Umidade {UMIDADE[0]}–{UMIDADE[1]}%</span><strong>{dias.filter((x) => x.umidade >= UMIDADE[0] && x.umidade <= UMIDADE[1]).length}/7 dias</strong></div>
-          <div><CloudRain size={18} /><span>Chuva ≤ {CHANCE_CHUVA_MAX}%</span><strong>{dias.filter((x) => x.chance <= CHANCE_CHUVA_MAX).length}/7 dias</strong></div>
+          <div>
+            <Thermometer size={18} />
+            <span>Temperatura {c.temperaturaMinima}–{c.temperaturaMaxima} °C</span>
+            <strong>{contTemp}/{total} dias</strong>
+          </div>
+          <div>
+            <Droplets size={18} />
+            <span>Umidade {c.umidadeMinima}–{c.umidadeMaxima}%</span>
+            <strong>{contUmid}/{total} dias</strong>
+          </div>
+          <div>
+            <CloudRain size={18} />
+            <span>Chuva ≤ {c.chanceChuvaMaxima}% e ≤ {c.chuvaMmMaxima} mm</span>
+            <strong>{contChuva}/{total} dias</strong>
+          </div>
         </div>
       </SectionCard>
 
-      <SectionCard title="Previsão dos próximos dias" subtitle="Fonte: Open-Meteo">
+      <SectionCard
+        title="Janela de exportação"
+        subtitle="Tendência de preço e demanda"
+        action={
+          produtos.length > 0 ? (
+            <select
+              className="previsao-select"
+              value={produto ?? ""}
+              onChange={(e) => setProduto(e.target.value)}
+              aria-label="Variedade de uva"
+            >
+              {produtos.map((nome) => (
+                <option key={nome} value={nome}>{nome}</option>
+              ))}
+            </select>
+          ) : null
+        }
+      >
+        {exportacao.temDados ? (
+          <>
+            <div className={`previsao-nota ${exportacao.favoravel ? "ok" : "aviso"}`}>
+              {exportacao.favoravel
+                ? "Momento favorável para exportar. "
+                : "Momento não favorável para exportar agora. "}
+              {exportacao.mensagem}
+            </div>
+            <div className="previsao-kpis">
+              <div className="previsao-kpi">
+                <span>Preço atual</span>
+                <strong>{Number(exportacao.precoAtual).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/kg</strong>
+              </div>
+              <div className="previsao-kpi">
+                <span>Variação do preço ({exportacao.diasAnalisados} dias)</span>
+                <strong>{sinal(exportacao.variacaoPrecoPercentual)}%</strong>
+              </div>
+              <div className="previsao-kpi">
+                <span>Demanda atual</span>
+                <strong>{exportacao.demandaAtual != null ? `${fmt(exportacao.demandaAtual)} t` : "—"}</strong>
+              </div>
+              <div className="previsao-kpi">
+                <span>Demanda média</span>
+                <strong>{exportacao.demandaMedia != null ? `${fmt(exportacao.demandaMedia)} t` : "—"}</strong>
+              </div>
+            </div>
+            <div className="previsao-nota info">
+              Os dados de mercado são simulados para demonstração. A tendência do preço é calculada por regressão linear
+              sobre os últimos registros.
+            </div>
+          </>
+        ) : (
+          <div className="empty-state">
+            <strong>Sem dados de mercado suficientes.</strong>
+            <span>{exportacao.mensagem}</span>
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Previsão dos próximos dias" subtitle="Fonte: Open-Meteo, corrigida pelo sensor quando há dados">
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Dia</th><th>Condição</th><th>Mín / Máx</th><th>Umidade média</th><th>Chuva</th><th>Colheita</th></tr>
+              <tr>
+                <th>Dia</th><th>Condição</th><th>Mín / Máx</th><th>Umidade média</th><th>Chuva</th><th>Colheita</th><th>Motivo</th>
+              </tr>
             </thead>
             <tbody>
-              {dias.map((x) => {
-                const c = condicao(x.codigo);
+              {dias.map((d) => {
+                const cond = condicao(d.codigoTempo);
                 return (
-                  <tr key={x.data}>
-                    <td>{diaCurto(x.data)}</td>
-                    <td>{c.texto}</td>
-                    <td>{fmt(x.tmin)} / {fmt(x.tmax)} °C</td>
-                    <td>{x.umidade !== null ? `${Math.round(x.umidade)}%` : "—"}</td>
-                    <td>{x.chance}% • {fmt(x.chuvaMm)} mm</td>
-                    <td><span className={`tag ${x.favoravel ? "success" : "orange"}`}>{x.favoravel ? "Favorável" : "Atenção"}</span></td>
+                  <tr key={d.data}>
+                    <td>{diaCurto(d.data)}</td>
+                    <td>{cond.texto}</td>
+                    <td>{d.tempMin != null ? fmt(d.tempMin) : "—"} / {d.tempMax != null ? fmt(d.tempMax) : "—"} °C</td>
+                    <td>{d.umidade != null ? `${Math.round(d.umidade)}%` : "—"}</td>
+                    <td>{d.chanceChuva}% • {fmt(d.chuvaMm)} mm</td>
+                    <td>
+                      <span className={`tag ${d.favoravel ? "success" : "orange"}`}>
+                        {d.favoravel ? "Favorável" : "Atenção"}
+                      </span>
+                    </td>
+                    <td className="previsao-motivo">{d.favoravel ? "—" : d.motivos.join("; ")}</td>
                   </tr>
                 );
               })}

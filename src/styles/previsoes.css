@@ -1,0 +1,71 @@
+.previsao-nota {
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.previsao-nota.ok {
+  background: #ecfdf3;
+  border: 1px solid #b7ebcb;
+  color: #166534;
+}
+
+.previsao-nota.aviso {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+}
+
+.previsao-nota.info {
+  background: #f5f0ff;
+  border: 1px solid #e2d6fb;
+  color: #4c1d95;
+  margin-top: 16px;
+  margin-bottom: 0;
+}
+
+.previsao-resumo {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
+
+.previsao-select {
+  padding: 8px 12px;
+  border: 1px solid #d9d5e6;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+}
+
+.previsao-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.previsao-kpi {
+  background: #fff;
+  border: 1px solid #e6e3ee;
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.previsao-kpi span {
+  display: block;
+  font-size: 13px;
+  color: #6b6580;
+  margin-bottom: 6px;
+}
+
+.previsao-kpi strong {
+  font-size: 20px;
+}
+
+.previsao-motivo {
+  font-size: 13px;
+  color: #6b6580;
+}

@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import SectionCard from "../components/SectionCard";
 import api from "../services/api";
-
-// Regra da coluna "Condição" (ajuste se tiver outra regra do projeto)
-const FAIXA_UMIDADE = [60, 75];
-const TEMP_MAX = 30;
+import { FAIXA_UMIDADE, TEMP_MAX, TEMP_MIN } from "../utils/criterios";
 
 const pad = (n) => String(n).padStart(2, "0");
 const fmt = (n) => Number(n).toFixed(1).replace(".", ",");
@@ -43,7 +40,8 @@ function agruparPorDia(leituras) {
       const temperatura = media(g.temps);
       const umidade = media(g.umids);
       const favoravel =
-        temperatura <= TEMP_MAX && umidade >= FAIXA_UMIDADE[0] && umidade <= FAIXA_UMIDADE[1];
+        temperatura >= TEMP_MIN && temperatura <= TEMP_MAX &&
+        umidade >= FAIXA_UMIDADE[0] && umidade <= FAIXA_UMIDADE[1];
       const [ano, mes, dia] = chave.split("-");
       return {
         chave,
