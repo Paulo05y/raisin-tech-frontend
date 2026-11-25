@@ -35,6 +35,9 @@ function ProtectedLayout({ onLogout, user, setUser }) {
 
   if (location.pathname === "/") return <Navigate to="/dashboard" replace />;
 
+  // Tela de usuários: só o administrador (o back-end também bloqueia com 403)
+  const ehAdmin = user?.role === "ADMINISTRADOR";
+
   const [title, subtitle] = pageTitles[location.pathname] || pageTitles["/dashboard"];
 
   const showNotice = (message) => {
@@ -50,7 +53,8 @@ function ProtectedLayout({ onLogout, user, setUser }) {
       ["histórico", "/historico"], ["historico", "/historico"], ["mercado", "/mercado"], ["dados de mercado", "/mercado"],
       ["preço", "/mercado"], ["preco", "/mercado"], ["demanda", "/mercado"],
       ["alerta", "/alertas"], ["alertas", "/alertas"],
-      ["relatório", "/relatorios"], ["relatorios", "/relatorios"], ["usuário", "/usuarios"], ["usuarios", "/usuarios"],
+      ["relatório", "/relatorios"], ["relatorios", "/relatorios"],
+      ...(ehAdmin ? [["usuário", "/usuarios"], ["usuarios", "/usuarios"]] : []),
       ["perfil", "/perfil"]
     ];
     const match = pages.find(([label]) => label.includes(value) || value.includes(label));
@@ -90,7 +94,7 @@ function ProtectedLayout({ onLogout, user, setUser }) {
             <Route path="/mercado" element={<DadosMercado />} />
             <Route path="/alertas" element={<Alertas />} />
             <Route path="/relatorios" element={<Relatorios onNotice={showNotice} />} />
-            <Route path="/usuarios" element={<Usuarios user={user} onNotice={showNotice} />} />
+            <Route path="/usuarios" element={ehAdmin ? <Usuarios user={user} onNotice={showNotice} /> : <Navigate to="/dashboard" replace />} />
             <Route path="/perfil" element={<Perfil user={user} setUser={setUser} onNotice={showNotice} />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

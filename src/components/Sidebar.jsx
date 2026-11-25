@@ -13,11 +13,14 @@ const items = [
   { to: "/mercado", label: "Dados de mercado", icon: TrendingUp },
   { to: "/alertas", label: "Alertas", icon: Bell },
   { to: "/relatorios", label: "Relatórios", icon: FileText },
-  { to: "/usuarios", label: "Usuários", icon: Users }
+  { to: "/usuarios", label: "Usuários", icon: Users, somenteAdmin: true }
 ];
 
 export default function Sidebar({ open, onClose, onLogout, role, user }) {
   const navigate = useNavigate();
+  // Só o administrador vê as telas de gestão (a proteção real está no back-end, que devolve 403)
+  const ehAdmin = role === "ADMINISTRADOR";
+  const itensVisiveis = items.filter((item) => !item.somenteAdmin || ehAdmin);
   const initials = user.name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 
   return (
@@ -32,7 +35,7 @@ export default function Sidebar({ open, onClose, onLogout, role, user }) {
         <div className="sidebar-section">
           <span className="section-label">MENU PRINCIPAL</span>
           <nav>
-            {items.map(({ to, label, icon: Icon }) => (
+            {itensVisiveis.map(({ to, label, icon: Icon }) => (
               <NavLink key={to} to={to} onClick={onClose} className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
                 <Icon size={19} />
                 <span>{label}</span>
